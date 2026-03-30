@@ -1,0 +1,736 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>추가매수 기준 판단기</title>
+  
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            toss: {
+              blue: '#3182f6',
+              bg: '#f2f4f6',
+              card: '#ffffff',
+              text: '#191f28',
+              subtext: '#8b95a1',
+              red: '#e52528',
+              green: '#20c997'
+            }
+          },
+          boxShadow: {
+            toss: '0 2px 10px rgba(0, 0, 0, 0.04)'
+          }
+        }
+      }
+    }
+  </script>
+
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  
+  <script src="https://unpkg.com/recharts/umd/Recharts.js"></script>
+
+  <style>
+    body { background-color: #f2f4f6; color: #191f28; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; -webkit-font-smoothing: antialiased; }
+    .hide-scrollbar::-webkit-scrollbar { display: none; }
+    .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel" data-presets="typescript,react">
+    const { useState, useEffect, useMemo, useCallback } = React;
+    const { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } = window.Recharts;
+
+    // ==========================================
+    // 3. JavaScript 데이터 타입 개념 설명 주석
+    // ==========================================
+    /*
+      DataRow: 원본 데이터 행 구조
+      Settings: 사용자 설정값 구조
+      CalcRow: 계산 엔진에 의해 확장된 시계열 데이터 행
+      SummaryMetrics: 요약 통계 구조
+      RecoveryRow: 회복 테이블 단일 행
+      EngineResult: 단일 통화(USD/KRW) 엔진 계산 결과
+    */
+
+    // ==========================================
+    // 4. 샘플 데이터 (결정론적 고정 데이터)
+    // ==========================================
+    const generateSampleData = () => {
+      const data = [];
+      let currentUsd = 100;
+      let currentKrwRate = 1300;
+      const today = new Date('2025-01-01');
+
+      for (let i = 0; i < 200; i++) {
+        const date = new Date(today);
+        date.setDate(date.getDate() - (200 - i));
+        
+        // Math.sin을 활용한 결정론적(Deterministic) 데이터 생성
+        const pseudoRandom1 = Math.sin(i * 12.345);
+        const pseudoRandom2 = Math.cos(i * 67.890);
+
+        currentUsd = currentUsd * (1 + (pseudoRandom1 - 0.48) * 0.02);
+        currentKrwRate = currentKrwRate * (1 + (pseudoRandom2 - 0.5) * 0.01);
+
+        data.push({
+          date: date.toISOString().split('T')[0],
+          closeUsd: Number(currentUsd.toFixed(2)),
+          usdKrw: Number(currentKrwRate.toFixed(2)),
+          closeKrw: Number((currentUsd * currentKrwRate).toFixed(0)),
+          dataFlag: 'ACTUAL',
+          notes: ''
+        });
+      }
+      return data;
+    };
+
+    const INITIAL_SAMPLE_DATA = generateSampleData();
+
+    const DEFAULT_SETTINGS = {
+      symbol: 'SPY',
+      startDate: INITIAL_SAMPLE_DATA[0].date,
+      endDate: INITIAL_SAMPLE_DATA[INITIAL_SAMPLE_DATA.length - 1].date,
+      targetRecoveryRateEtf: 0.95,
+      targetRecoveryRateStock: 0.90,
+      bandStep: 0.05,
+      assetType: 'ETF', // ETF | STOCK
+      priceMode: 'Replica', // Replica | Improved
+      currencyMode: 'BOTH', // USD | KRW | BOTH
+      primarySignalMode: 'USD', // USD | KRW
+      fearGreed: 'Extreme Fear', 
+      lifeGateCashReady: true,
+      lifeGateIncomeExpense: true,
+      manualTargetDd1: -0.20,
+      manualTargetDd2: -0.30,
+      manualTargetDd3: -0.40,
+    };
+
+    // ==========================================
+    // 5. 계산 엔진 함수들 (DOM 접근 금지)
+    // ==========================================
+    
+    const filterRawDataByDateRange = (data, startDate, endDate) => {
+      return data.filter(d => d.date >= startDate && d.date <= endDate);
+    };
+
+    const buildKrwSeries = (data) => {
+      return data.map(d => ({
+        ...d,
+        closeKrw: d.closeKrw || (d.closeUsd * d.usdKrw)
+      }));
+    };
+
+    const calcDrawdownSeries = (data, closeKey) => {
+      let maxAth = 0;
+      return data.map(row => {
+        const close = row[closeKey];
+        if (close > maxAth) maxAth = close;
+        const dd = maxAth > 0 ? (close / maxAth) - 1 : 0;
+        return { ...row, value: close, ath: maxAth, dd };
+      });
+    };
+
+    const calcSummaryMetrics = (calcRows) => {
+      if (!calcRows || calcRows.length === 0) return { mdd: 0, mddDate: '', avgDd: 0, currentPrice: 0, currentDd: 0, currentAth: 0 };
+      let mdd = 0;
+      let mddDate = '';
+      let sumDd = 0;
+
+      calcRows.forEach(row => {
+        if (row.dd < mdd) {
+          mdd = row.dd;
+          mddDate = row.date;
+        }
+        sumDd += row.dd;
+      });
+
+      const lastRow = calcRows[calcRows.length - 1];
+      return {
+        mdd,
+        mddDate,
+        avgDd: sumDd / calcRows.length,
+        currentPrice: lastRow.value,
+        currentDd: lastRow.dd,
+        currentAth: lastRow.ath
+      };
+    };
+
+    const buildThresholds = (bandStep) => {
+      const thresholds = [];
+      for (let i = -1.0; i <= 0.0001; i += bandStep) {
+        thresholds.push(Number(i.toFixed(4)));
+      }
+      return thresholds; // [-1.0, -0.95, ..., -0.05, 0.0]
+    };
+
+    const calcRecoveryTable = (calcRows, thresholds) => {
+      const tradingDays = calcRows.length;
+      if (tradingDays === 0) return [];
+
+      return thresholds.map((threshold, index) => {
+        const conditionDays = calcRows.filter(r => r.dd >= threshold).length;
+        const recoveryRate = conditionDays / tradingDays;
+
+        let bandConditionDays = 0;
+        if (index === 0) {
+          bandConditionDays = conditionDays;
+        } else {
+          const prevThreshold = thresholds[index - 1];
+          bandConditionDays = calcRows.filter(
+            r => r.dd >= threshold && r.dd < prevThreshold
+          ).length;
+        }
+
+        const bandWeight = bandConditionDays / tradingDays;
+        return { threshold, conditionDays, tradingDays, recoveryRate, bandConditionDays, bandWeight };
+      });
+    };
+
+    const findTargetDrawdownByRecoveryRate = (recoveryRows, targetRecoveryRate) => {
+      for (let i = recoveryRows.length - 1; i >= 0; i--) {
+        if (recoveryRows[i].recoveryRate >= targetRecoveryRate) {
+          return recoveryRows[i].threshold;
+        }
+      }
+      return -1.0;
+    };
+
+    const calcSignedGap = (targetDD, currentDD) => {
+      return targetDD - currentDD;
+    };
+
+    const calcRemainingDropNeeded = (targetPrice, currentPrice) => {
+      if (currentPrice <= 0) return { amount: 0, percent: 0 };
+      const amount = targetPrice - currentPrice;
+      const percent = (targetPrice / currentPrice) - 1;
+      return { amount, percent };
+    };
+
+    const evaluateLifeGate = (settings) => settings.lifeGateCashReady && settings.lifeGateIncomeExpense;
+    const evaluateFearGate = (settings) => settings.fearGreed === 'Extreme Fear';
+    const evaluateDdGate = (currentDD, targetDD) => currentDD <= targetDD;
+    const evaluateMarketGate = (fearGate, ddGate) => fearGate && ddGate;
+    const evaluateFinalBuySignal = (lifeGate, marketGate) => lifeGate && marketGate;
+
+    const runEngine = (data, closeKey, settings) => {
+      const filtered = filterRawDataByDateRange(data, settings.startDate, settings.endDate);
+      const series = calcDrawdownSeries(filtered, closeKey);
+      const metrics = calcSummaryMetrics(series);
+      const thresholds = buildThresholds(settings.bandStep);
+      const recoveryTable = calcRecoveryTable(series, thresholds);
+      
+      const targetRecRate = settings.assetType === 'ETF' ? settings.targetRecoveryRateEtf : settings.targetRecoveryRateStock;
+      const targetDD = findTargetDrawdownByRecoveryRate(recoveryTable, targetRecRate);
+      
+      const targetPrice = metrics.currentAth * (1 + targetDD);
+      const signedGap = calcSignedGap(targetDD, metrics.currentDd);
+      const remainingDrop = calcRemainingDropNeeded(targetPrice, metrics.currentPrice);
+
+      const ddGate = evaluateDdGate(metrics.currentDd, targetDD);
+
+      return {
+        series, metrics, recoveryTable, targetDD, targetPrice, signedGap, remainingDrop, ddGate
+      };
+    };
+
+    const buildVerifyCases = (appState) => {
+      const { usdEngine, krwEngine, settings, finalSignal } = appState;
+      const targetRecRate = settings.assetType === 'ETF'
+        ? settings.targetRecoveryRateEtf
+        : settings.targetRecoveryRateStock;
+
+      const usdBandWeightSum = usdEngine?.recoveryTable.reduce((s, r) => s + r.bandWeight, 0);
+      const krwBandWeightSum = krwEngine?.recoveryTable.reduce((s, r) => s + r.bandWeight, 0);
+      const usdTargetRow = usdEngine?.recoveryTable.find(r => r.threshold === usdEngine?.targetDD);
+
+      return [
+        { key: 'USD MDD',
+          expected: '<= 0',
+          actual: usdEngine?.metrics.mdd.toFixed(4) ?? 'N/A',
+          pass: usdEngine ? usdEngine.metrics.mdd <= 0 : false },
+        { key: 'KRW MDD',
+          expected: '<= 0',
+          actual: krwEngine?.metrics.mdd.toFixed(4) ?? 'N/A',
+          pass: krwEngine ? krwEngine.metrics.mdd <= 0 : false },
+        { key: 'Trading Days',
+          expected: '> 0',
+          actual: usdEngine?.series.length ?? 'N/A',
+          pass: usdEngine ? usdEngine.series.length > 0 : false },
+        { key: 'USD Target DD 범위',
+          expected: '-1.0 ~ 0',
+          actual: usdEngine?.targetDD ?? 'N/A',
+          pass: usdEngine ? (usdEngine.targetDD >= -1.0 && usdEngine.targetDD <= 0) : false },
+        { key: 'USD RecoveryRate @ TargetDD',
+          expected: `>= ${targetRecRate}`,
+          actual: usdTargetRow?.recoveryRate.toFixed(4) ?? 'N/A',
+          pass: usdTargetRow ? usdTargetRow.recoveryRate >= targetRecRate : false },
+        { key: 'USD BandWeight 합계',
+          expected: '≈ 1.0 (±0.01)',
+          actual: usdBandWeightSum?.toFixed(4) ?? 'N/A',
+          pass: usdBandWeightSum !== undefined ? Math.abs(usdBandWeightSum - 1.0) < 0.01 : false },
+        { key: 'KRW BandWeight 합계',
+          expected: '≈ 1.0 (±0.01)',
+          actual: krwBandWeightSum?.toFixed(4) ?? 'N/A',
+          pass: krwBandWeightSum !== undefined ? Math.abs(krwBandWeightSum - 1.0) < 0.01 : false },
+        { key: 'DD Gate (Primary)',
+          expected: 'Boolean',
+          actual: appState.primaryEngine?.ddGate.toString() ?? 'N/A',
+          pass: typeof appState.primaryEngine?.ddGate === 'boolean' },
+        { key: 'Final Buy Signal',
+          expected: 'Boolean',
+          actual: finalSignal.toString(),
+          pass: typeof finalSignal === 'boolean' },
+      ];
+    };
+
+    // ==========================================
+    // 6. localStorage 함수들
+    // ==========================================
+    
+    const useLocalStorage = (key, initialValue) => {
+      const [storedValue, setStoredValue] = useState(() => {
+        try {
+          const item = window.localStorage.getItem(key);
+          if (!item) return initialValue;
+          const parsed = JSON.parse(item);
+          if (typeof initialValue === 'object' && !Array.isArray(initialValue) && initialValue !== null) {
+            return { ...initialValue, ...parsed };
+          }
+          return parsed;
+        } catch (error) {
+          console.error(error);
+          return initialValue;
+        }
+      });
+
+      const setValue = (value) => {
+        try {
+          const valueToStore = value instanceof Function ? value(storedValue) : value;
+          setStoredValue(valueToStore);
+          window.localStorage.setItem(key, JSON.stringify(valueToStore));
+        } catch (error) {
+          console.error(error);
+        }
+      };
+
+      return [storedValue, setValue];
+    };
+
+    // ==========================================
+    // 7. UI Components (Toss Style)
+    // ==========================================
+    
+    const Card = ({ children, title, className = '' }) => (
+      <div className={`bg-white rounded-[24px] shadow-toss p-6 mb-4 ${className}`}>
+        {title && <h3 className="text-lg font-bold text-toss-text mb-4">{title}</h3>}
+        {children}
+      </div>
+    );
+
+    const Badge = ({ status, text }) => {
+      const styles = {
+        TRIGGERED: 'bg-blue-100 text-toss-blue',
+        WAIT: 'bg-gray-100 text-toss-subtext',
+        PASS: 'bg-green-100 text-toss-green',
+        FAIL: 'bg-red-100 text-toss-red'
+      };
+      return (
+        <span className={`px-3 py-1 rounded-full text-sm font-bold ${styles[status] || styles.WAIT}`}>
+          {text || status}
+        </span>
+      );
+    };
+
+    const Metric = ({ label, value, subValue, highlight }) => (
+      <div className="flex flex-col">
+        <span className="text-sm text-toss-subtext font-medium mb-1">{label}</span>
+        <span className={`text-2xl font-bold ${highlight ? 'text-toss-blue' : 'text-toss-text'}`}>{value}</span>
+        {subValue && <span className="text-sm text-toss-subtext mt-1">{subValue}</span>}
+      </div>
+    );
+
+    // ==========================================
+    // 8. Main App Component
+    // ==========================================
+    
+    const App = () => {
+      const [settings, setSettings] = useLocalStorage('bsc_settings', DEFAULT_SETTINGS);
+      const [rawData, setRawData] = useLocalStorage('bsc_rawData', INITIAL_SAMPLE_DATA);
+      const [activeTab, setActiveTab] = useState('Dashboard');
+
+      const appState = useMemo(() => {
+        const krwData = buildKrwSeries(rawData);
+        
+        let usdEngine = null;
+        let krwEngine = null;
+
+        if (settings.currencyMode === 'USD' || settings.currencyMode === 'BOTH') {
+          usdEngine = runEngine(rawData, 'closeUsd', settings);
+        }
+        if (settings.currencyMode === 'KRW' || settings.currencyMode === 'BOTH') {
+          krwEngine = runEngine(krwData, 'closeKrw', settings);
+        }
+
+        const primaryEngine = settings.primarySignalMode === 'KRW' && krwEngine ? krwEngine : usdEngine;
+        
+        const lifeGate = evaluateLifeGate(settings);
+        const fearGate = evaluateFearGate(settings);
+        const ddGate = primaryEngine ? primaryEngine.ddGate : false;
+        const marketGate = evaluateMarketGate(fearGate, ddGate);
+        const finalSignal = evaluateFinalBuySignal(lifeGate, marketGate);
+
+        const configWarning =
+          (settings.primarySignalMode === 'USD' && !usdEngine)
+            ? 'Primary Signal = USD이지만 Currency Mode에 USD가 포함되지 않아 Final Signal이 항상 WAIT입니다.' :
+          (settings.primarySignalMode === 'KRW' && !krwEngine)
+            ? 'Primary Signal = KRW이지만 Currency Mode에 KRW가 포함되지 않아 Final Signal이 항상 WAIT입니다.' :
+          null;
+
+        return {
+          usdEngine,
+          krwEngine,
+          primaryEngine,
+          lifeGate,
+          fearGate,
+          marketGate,
+          finalSignal,
+          settings,
+          configWarning
+        };
+      }, [rawData, settings]);
+
+      const formatNum = (num, decimals = 2) => Number(num).toLocaleString('ko-KR', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+      const formatPct = (num) => (num * 100).toFixed(2) + '%';
+
+      const renderSummaryCard = (engine, title, symbolPrefix) => {
+        if (!engine) return null;
+        return (
+          <Card title={`${title} Engine Summary`}>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <Metric label="Current Price" value={`${symbolPrefix}${formatNum(engine.metrics.currentPrice)}`} />
+              <Metric label="Current DD" value={formatPct(engine.metrics.currentDd)} highlight={engine.ddGate} />
+              <Metric label="Target DD" value={formatPct(engine.targetDD)} />
+              <Metric label="Target Price" value={`${symbolPrefix}${formatNum(engine.targetPrice)}`} />
+            </div>
+            <div className="mt-6 p-4 bg-gray-50 rounded-2xl flex justify-between items-center">
+              <div>
+                <p className="text-sm text-toss-subtext">Remaining Drop Needed</p>
+                <p className="text-lg font-bold text-toss-text">
+                  {formatPct(engine.remainingDrop.percent)} ({symbolPrefix}{formatNum(engine.remainingDrop.amount)})
+                </p>
+              </div>
+              <Badge status={engine.ddGate ? 'TRIGGERED' : 'WAIT'} />
+            </div>
+          </Card>
+        );
+      };
+
+      const renderSimpleTable = (headers, rows, keyGen, renderRow) => (
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-sm">
+            <thead className="bg-gray-50 border-b">
+              <tr>{headers.map((h, i) => <th key={i} className="p-3 font-medium text-toss-subtext">{h}</th>)}</tr>
+            </thead>
+            <tbody>
+              {rows.map((row, i) => (
+                <tr key={keyGen(row, i)} className="border-b last:border-0 hover:bg-gray-50 transition-colors">
+                  {renderRow(row, i).map((cell, j) => <td key={j} className="p-3">{cell}</td>)}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      );
+
+      const renderDashboard = () => (
+        <div className="space-y-6 animate-fade-in">
+          {appState.configWarning && (
+            <div className="bg-yellow-50 border border-yellow-200 rounded-2xl p-4 text-sm text-yellow-800 font-medium">
+              ⚠️ {appState.configWarning}
+            </div>
+          )}
+          <div className="text-center py-8">
+            <h2 className="text-xl text-toss-subtext font-medium mb-2">{settings.symbol} Buy Signal</h2>
+            <div className={`text-5xl font-black ${appState.finalSignal ? 'text-toss-blue' : 'text-gray-300'}`}>
+              {appState.finalSignal ? 'TRIGGERED' : 'WAIT'}
+            </div>
+            <p className="text-sm mt-4 text-toss-subtext">
+              Primary Mode: {settings.primarySignalMode} | Currency Mode: {settings.currencyMode}
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Card title="Life Gate" className="flex flex-col justify-between">
+              <ul className="space-y-3 mb-4 text-sm">
+                <li className="flex justify-between"><span>Cash Ready</span> <span>{settings.lifeGateCashReady ? '✅' : '❌'}</span></li>
+                <li className="flex justify-between"><span>Income > Expense</span> <span>{settings.lifeGateIncomeExpense ? '✅' : '❌'}</span></li>
+              </ul>
+              <div className="text-right">
+                <Badge status={appState.lifeGate ? 'PASS' : 'FAIL'} />
+              </div>
+            </Card>
+
+            <Card title="Market Gate" className="flex flex-col justify-between">
+              <ul className="space-y-3 mb-4 text-sm">
+                <li className="flex justify-between"><span>Extreme Fear</span> <span>{appState.fearGate ? '✅' : '❌'}</span></li>
+                <li className="flex justify-between"><span>DD Reached ({settings.primarySignalMode})</span> <span>{appState.primaryEngine?.ddGate ? '✅' : '❌'}</span></li>
+              </ul>
+              <div className="text-right">
+                <Badge status={appState.marketGate ? 'PASS' : 'FAIL'} />
+              </div>
+            </Card>
+          </div>
+
+          {renderSummaryCard(appState.usdEngine, 'USD', '$')}
+          {renderSummaryCard(appState.krwEngine, 'KRW', '₩')}
+        </div>
+      );
+
+      const renderDetail = () => (
+        <div className="space-y-6 animate-fade-in">
+          {['USD', 'KRW'].map(mode => {
+            const engine = mode === 'USD' ? appState.usdEngine : appState.krwEngine;
+            if (!engine) return null;
+            return (
+              <Card key={mode} title={`${mode} Drawdown Chart & Recovery`}>
+                <div className="h-64 w-full mb-6">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={engine.series}>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#eee" />
+                      <XAxis dataKey="date" tick={{fontSize: 12}} minTickGap={30} />
+                      <YAxis tickFormatter={(v) => formatPct(v)} domain={['auto', 0]} orientation="right" tick={{fontSize: 12}} />
+                      <Tooltip formatter={(val) => formatPct(val)} labelStyle={{color: '#191f28'}} />
+                      <ReferenceLine y={engine.targetDD} stroke="#e52528" strokeDasharray="3 3" label="Target DD" />
+                      <Line type="monotone" dataKey="dd" stroke="#3182f6" strokeWidth={2} dot={false} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+
+                <h4 className="font-bold text-toss-text mb-3">Recovery Table</h4>
+                {renderSimpleTable(
+                  ['Threshold', 'Condition Days', 'Recovery Rate', 'Band Days', 'Band Weight'],
+                  engine.recoveryTable,
+                  (r) => r.threshold,
+                  (r) => [
+                    formatPct(r.threshold),
+                    r.conditionDays,
+                    formatPct(r.recoveryRate),
+                    r.bandConditionDays,
+                    formatPct(r.bandWeight)
+                  ]
+                )}
+                
+                <h4 className="font-bold text-toss-text mt-6 mb-3">Manual Target Prices</h4>
+                {renderSimpleTable(
+                  ['Manual Target DD', 'Target Price', 'Drop Needed (%)'],
+                  [settings.manualTargetDd1, settings.manualTargetDd2, settings.manualTargetDd3],
+                  (val) => val,
+                  (val) => {
+                    const price = engine.metrics.currentAth * (1 + val);
+                    const drop = calcRemainingDropNeeded(price, engine.metrics.currentPrice);
+                    return [
+                      formatPct(val),
+                      formatNum(price),
+                      formatPct(drop.percent)
+                    ];
+                  }
+                )}
+              </Card>
+            );
+          })}
+        </div>
+      );
+
+      const renderSettings = () => {
+        const handleInputChange = (e) => {
+          const { name, value, type, checked } = e.target;
+          setSettings(prev => ({
+            ...prev,
+            [name]: type === 'checkbox' ? checked : (type === 'number' ? Number(value) : value)
+          }));
+        };
+
+        const handleResetData = () => {
+          if(confirm('데이터를 초기 샘플로 되돌리시겠습니까?')) {
+            setRawData(generateSampleData());
+          }
+        };
+
+        const handleExport = () => {
+          const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(rawData));
+          const el = document.createElement('a');
+          el.setAttribute("href", dataStr);
+          const todayStr = new Date().toISOString().split('T')[0];
+          el.setAttribute("download", `bsc_data_${settings.symbol}_${todayStr}.json`);
+          el.click();
+        };
+
+        const handleImport = (e) => {
+          const file = e.target.files[0];
+          if(!file) return;
+          const reader = new FileReader();
+          reader.onload = (event) => {
+            try {
+              const json = JSON.parse(event.target.result);
+              const isValid = Array.isArray(json) && json.length > 0
+                && typeof json[0].date === 'string'
+                && typeof json[0].closeUsd === 'number';
+              if (!isValid) {
+                alert('데이터 형식 오류: date, closeUsd 필드가 있는 배열이어야 합니다.');
+                return;
+              }
+              setRawData(json);
+              alert(`데이터 임포트 완료 (${json.length}행)`);
+            } catch(err) {
+              alert('JSON 파싱 에러: 파일을 확인해주세요.');
+            }
+          };
+          reader.readAsText(file);
+        };
+
+        return (
+          <div className="space-y-6 animate-fade-in">
+            <Card title="Core Settings">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="flex flex-col"><label className="text-sm mb-1 text-toss-subtext">Symbol</label><input className="p-2 border rounded-lg bg-gray-50 outline-none focus:border-toss-blue" name="symbol" value={settings.symbol} onChange={handleInputChange} /></div>
+                <div className="flex flex-col"><label className="text-sm mb-1 text-toss-subtext">Start Date</label><input type="date" className="p-2 border rounded-lg bg-gray-50 outline-none" name="startDate" value={settings.startDate} onChange={handleInputChange} /></div>
+                <div className="flex flex-col"><label className="text-sm mb-1 text-toss-subtext">End Date</label><input type="date" className="p-2 border rounded-lg bg-gray-50 outline-none" name="endDate" value={settings.endDate} onChange={handleInputChange} /></div>
+                <div className="flex flex-col">
+                  <label className="text-sm mb-1 text-toss-subtext">Asset Type</label>
+                  <select className="p-2 border rounded-lg bg-gray-50 outline-none" name="assetType" value={settings.assetType} onChange={handleInputChange}>
+                    <option value="ETF">ETF</option>
+                    <option value="STOCK">STOCK</option>
+                  </select>
+                </div>
+                <div className="flex flex-col"><label className="text-sm mb-1 text-toss-subtext">Target Recovery (ETF)</label><input type="number" step="0.01" className="p-2 border rounded-lg bg-gray-50 outline-none" name="targetRecoveryRateEtf" value={settings.targetRecoveryRateEtf} onChange={handleInputChange} /></div>
+                <div className="flex flex-col"><label className="text-sm mb-1 text-toss-subtext">Target Recovery (Stock)</label><input type="number" step="0.01" className="p-2 border rounded-lg bg-gray-50 outline-none" name="targetRecoveryRateStock" value={settings.targetRecoveryRateStock} onChange={handleInputChange} /></div>
+                <div className="flex flex-col"><label className="text-sm mb-1 text-toss-subtext">Band Step</label><input type="number" step="0.01" className="p-2 border rounded-lg bg-gray-50 outline-none" name="bandStep" value={settings.bandStep} onChange={handleInputChange} /></div>
+                <div className="flex flex-col">
+                  <label className="text-sm mb-1 text-toss-subtext">Currency Mode</label>
+                  <select className="p-2 border rounded-lg bg-gray-50 outline-none" name="currencyMode" value={settings.currencyMode} onChange={handleInputChange}>
+                    <option value="USD">USD Only</option>
+                    <option value="KRW">KRW Only</option>
+                    <option value="BOTH">BOTH (Calc Both)</option>
+                  </select>
+                </div>
+                <div className="flex flex-col">
+                  <label className="text-sm mb-1 text-toss-subtext">Primary Signal Mode</label>
+                  <select className="p-2 border rounded-lg bg-gray-50 outline-none" name="primarySignalMode" value={settings.primarySignalMode} onChange={handleInputChange}>
+                    <option value="USD">USD</option>
+                    <option value="KRW">KRW</option>
+                  </select>
+                </div>
+              </div>
+            </Card>
+
+            <Card title="Gates & Manual Targets">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="flex flex-col">
+                  <label className="text-sm mb-1 text-toss-subtext">Fear & Greed</label>
+                  <select className="p-2 border rounded-lg bg-gray-50 outline-none" name="fearGreed" value={settings.fearGreed} onChange={handleInputChange}>
+                    <option value="Extreme Fear">Extreme Fear</option>
+                    <option value="Fear">Fear</option>
+                    <option value="Neutral">Neutral</option>
+                    <option value="Greed">Greed</option>
+                  </select>
+                </div>
+                <div className="flex items-center space-x-2 mt-6">
+                  <input type="checkbox" className="w-5 h-5 accent-toss-blue" name="lifeGateCashReady" checked={settings.lifeGateCashReady} onChange={handleInputChange} />
+                  <label className="text-sm text-toss-text">Life Gate: Cash Ready</label>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <input type="checkbox" className="w-5 h-5 accent-toss-blue" name="lifeGateIncomeExpense" checked={settings.lifeGateIncomeExpense} onChange={handleInputChange} />
+                  <label className="text-sm text-toss-text">Life Gate: Income {'>'} Expense</label>
+                </div>
+                <div className="flex flex-col mt-4"><label className="text-sm mb-1 text-toss-subtext">Manual DD 1</label><input type="number" step="0.01" className="p-2 border rounded-lg bg-gray-50" name="manualTargetDd1" value={settings.manualTargetDd1} onChange={handleInputChange} /></div>
+                <div className="flex flex-col"><label className="text-sm mb-1 text-toss-subtext">Manual DD 2</label><input type="number" step="0.01" className="p-2 border rounded-lg bg-gray-50" name="manualTargetDd2" value={settings.manualTargetDd2} onChange={handleInputChange} /></div>
+                <div className="flex flex-col"><label className="text-sm mb-1 text-toss-subtext">Manual DD 3</label><input type="number" step="0.01" className="p-2 border rounded-lg bg-gray-50" name="manualTargetDd3" value={settings.manualTargetDd3} onChange={handleInputChange} /></div>
+              </div>
+            </Card>
+
+            <Card title="Data Management">
+              <div className="flex space-x-4">
+                <button onClick={handleResetData} className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 font-medium transition-colors">샘플 데이터 리셋</button>
+                <button onClick={handleExport} className="px-4 py-2 bg-toss-blue text-white rounded-lg hover:bg-blue-600 font-medium transition-colors">JSON Export</button>
+                <label className="px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 font-medium cursor-pointer transition-colors">
+                  JSON Import
+                  <input type="file" accept=".json" className="hidden" onChange={handleImport} />
+                </label>
+              </div>
+            </Card>
+          </div>
+        );
+      };
+
+      const renderVerify = () => {
+        const cases = buildVerifyCases(appState);
+        return (
+          <div className="space-y-6 animate-fade-in">
+            <Card title="Engine Verification">
+              {renderSimpleTable(
+                ['Metric / Gate', 'Expected Criteria', 'Actual Value', 'Status'],
+                cases,
+                (c, i) => i,
+                (c) => [
+                  <span className="font-medium text-toss-text">{c.key}</span>,
+                  <span className="text-toss-subtext">{c.expected}</span>,
+                  <span className="font-mono">{c.actual ?? 'N/A'}</span>,
+                  <Badge status={c.pass ? 'PASS' : 'FAIL'} />
+                ]
+              )}
+            </Card>
+          </div>
+        );
+      };
+
+      // ==========================================
+      // 9. 앱 초기화 및 렌더 트리
+      // ==========================================
+      
+      const TABS = ['Dashboard', 'Detail', 'Settings', 'Verify'];
+
+      return (
+        <div className="max-w-4xl mx-auto p-4 md:p-8">
+          <header className="mb-8 text-center md:text-left">
+            <h1 className="text-2xl font-black text-toss-text">Buy Signal Calculator</h1>
+            <p className="text-toss-subtext text-sm mt-1">월적립 장기투자자를 위한 기계적 추가매수 판단 엔진</p>
+          </header>
+
+          <nav className="flex space-x-2 mb-8 overflow-x-auto hide-scrollbar pb-2">
+            {TABS.map(tab => (
+              <button
+                key={tab}
+                onClick={() => setActiveTab(tab)}
+                className={`px-5 py-2.5 rounded-full text-sm font-bold whitespace-nowrap transition-colors ${
+                  activeTab === tab ? 'bg-toss-text text-white' : 'bg-white text-toss-subtext hover:bg-gray-50 border border-gray-200'
+                }`}
+              >
+                {tab}
+              </button>
+            ))}
+          </nav>
+
+          <main>
+            {activeTab === 'Dashboard' && renderDashboard()}
+            {activeTab === 'Detail' && renderDetail()}
+            {activeTab === 'Settings' && renderSettings()}
+            {activeTab === 'Verify' && renderVerify()}
+          </main>
+        </div>
+      );
+    };
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
