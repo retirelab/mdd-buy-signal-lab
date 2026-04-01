@@ -257,7 +257,7 @@
     }
 
     // ------------------------------
-    // Utils
+    // Utils & Date Helpers
     // ------------------------------
     function formatPct(val) {
       return (val * 100).toFixed(2) + '%';
@@ -281,6 +281,34 @@
       if (!data || !Array.isArray(data)) return null;
       const row = data.find(r => r.closeKrw !== null && Number.isFinite(Number(r.closeKrw)));
       return row ? row.date : null;
+    }
+
+    function getMaxDate(...dates) {
+      const validDates = dates.filter(d => d && typeof d === 'string');
+      if (validDates.length === 0) return null;
+      return validDates.reduce((max, d) => d > max ? d : max, validDates[0]);
+    }
+
+    function getAnalysisDateInfo(rawData, settings, dataSource) {
+      const usdRawStartDate = rawData.length > 0 ? rawData[0].date : null;
+      let krwRawStartDate = getFirstValidKrwDate(rawData);
+
+      if (dataSource === 'IMPORTED' || dataSource === 'SAMPLE') {
+        if (!krwRawStartDate) krwRawStartDate = usdRawStartDate;
+      }
+
+      const requestedStartDate = settings.startDate;
+
+      const usdEffectiveStartDate = getMaxDate(requestedStartDate, usdRawStartDate) || requestedStartDate;
+      const krwEffectiveStartDate = getMaxDate(requestedStartDate, usdRawStartDate, krwRawStartDate) || requestedStartDate;
+
+      return {
+        usdRawStartDate,
+        krwRawStartDate,
+        requestedStartDate,
+        usdEffectiveStartDate,
+        krwEffectiveStartDate
+      };
     }
 
     function normalizePriceRows(rows) {
@@ -355,7 +383,7 @@
       const step = Number(settings.bandStep);
       if (!Number.isFinite(step) || step <= 0) return null;
 
-      // null이 아닌 유효한 행만 필터링 (최초 환율 적용 전 날짜 등 제외)
+      // null이 아닌 유효한 행만 필터링 (최초 환율 적용 전 날짜 등 자동 제외)
       const data = filterRawDataByDateRange(rawData, settings.startDate, settings.endDate)
         .filter((row) => row[priceKey] !== null && Number.isFinite(Number(row[priceKey])));
 
@@ -595,7 +623,7 @@
       }, []);
 
       const [activeTab, setActiveTab] = useState('dashboard');
-      const [settings, setSettings] = useLocalStorage('mdd_settings_v4', DEFAULT_SETTINGS);
+      const [settings, setSettings] = useLocalStorage('mdd_settings_v5', DEFAULT_SETTINGS);
       const [reloadToken, setReloadToken] = useState(0);
 
       const [rawData, setRawData] = useState([]);
@@ -719,29 +747,24 @@
         let configWarning = null;
 
         const safeBandStep = Number(settings.bandStep);
-        const filtered = filterRawDataByDateRange(rawData, settings.startDate, settings.endDate);
-        const firstValidKrwDate = getFirstValidKrwDate(rawData);
+        const dateInfo = getAnalysisDateInfo(rawData, settings, dataSource);
 
         if (!Number.isFinite(safeBandStep) || safeBandStep <= 0) {
           configWarning = 'Band Step은 0보다 큰 숫자여야 합니다.';
-        } else if (filtered.length === 0 && dataSource !== 'LOADING') {
+        } else if (rawData.length === 0 && dataSource !== 'LOADING') {
           configWarning = '지정된 날짜 범위에 유효한 데이터가 없습니다.';
         } else if (dataSource !== 'LOADING') {
           if (settings.currencyMode === 'USD' || settings.currencyMode === 'BOTH') {
-            usdEngine = runEngine(rawData, 'closeUsd', settings);
+            const usdSettings = { ...settings, startDate: dateInfo.usdEffectiveStartDate };
+            usdEngine = runEngine(rawData, 'closeUsd', usdSettings);
           }
           
           if (settings.currencyMode === 'KRW' || settings.currencyMode === 'BOTH') {
-            const krwSettings = {
-              ...settings,
-              startDate: firstValidKrwDate && settings.startDate < firstValidKrwDate
-                ? firstValidKrwDate
-                : settings.startDate
-            };
+            const krwSettings = { ...settings, startDate: dateInfo.krwEffectiveStartDate };
             krwEngine = runEngine(rawData, 'closeKrw', krwSettings);
             
-            if (firstValidKrwDate && settings.startDate < firstValidKrwDate && settings.currencyMode !== 'USD') {
-              configWarning = `KRW 분석은 환율 데이터가 존재하는 첫 날짜(${firstValidKrwDate})부터만 유효합니다. KRW 엔진 시작일을 자동 보정했습니다.`;
+            if (dateInfo.krwRawStartDate && settings.startDate < dateInfo.krwRawStartDate && settings.currencyMode !== 'USD') {
+              configWarning = `KRW 분석은 환율 데이터가 존재하는 첫 날짜(${dateInfo.krwRawStartDate})부터만 유효합니다. KRW 엔진 시작일을 자동 보정했습니다.`;
             }
           }
 
@@ -762,7 +785,7 @@
           krwEngine,
           configWarning,
           primaryEngine,
-          filteredLength: filtered.length,
+          dateInfo,
           gates: {
             lifeGate,
             fearGate,
@@ -920,17 +943,12 @@
 
         const lines = [];
 
-        if (appState.filteredLength === 0) {
-          return ['현재 선택된 날짜 범위에 데이터가 없어 분석이 불가능합니다.'];
-        }
-
         if (!appState.primaryEngine) {
           return ['엔진 설정 문제로 분석을 수행하지 못했습니다. 설정 탭을 확인해주세요.'];
         }
 
         const e = appState.primaryEngine;
-
-        lines.push(`분석된 데이터는 총 ${appState.filteredLength}일치입니다.`);
+        lines.push(`분석된 데이터는 총 ${e.timeSeries.length}일치입니다.`);
 
         if (e.target.remainingDrop >= 0) {
           lines.push(`현재 하락폭(${formatPct(e.metrics.currentDd)})이 목표 하락폭(${formatPct(e.target.dd)})에 도달하여 규칙상 매수 가능 구간입니다.`);
@@ -963,9 +981,7 @@
       // Renderers
       // ------------------------------
       function renderDashboard() {
-        const firstDateUsd = rawData.length > 0 ? rawData[0].date : 'N/A';
-        const firstValidKrwDate = getFirstValidKrwDate(rawData) || 'N/A';
-        const krwActualStartDate = (firstValidKrwDate !== 'N/A' && settings.startDate < firstValidKrwDate) ? firstValidKrwDate : settings.startDate;
+        const dInfo = appState.dateInfo || {};
 
         return (
           <div className="space-y-6 animate-fade-in pb-10">
@@ -998,36 +1014,44 @@
                 </div>
 
                 <div className="bg-toss-gray/50 px-3 py-2 rounded-xl flex-1 md:flex-none text-center">
-                  <p className="text-[10px] text-toss-subtext font-bold mb-0.5">범위 내 데이터</p>
-                  <p className="font-bold text-toss-text">{formatNum(appState.filteredLength)}행</p>
+                  <p className="text-[10px] text-toss-subtext font-bold mb-0.5">분석 데이터 수</p>
+                  <p className="font-bold text-toss-text text-[11px] mt-0.5">
+                    {appState.usdEngine ? `USD: ${appState.usdEngine.timeSeries.length} ` : ''}
+                    {appState.krwEngine ? `KRW: ${appState.krwEngine.timeSeries.length}` : ''}
+                    {!appState.usdEngine && !appState.krwEngine ? '0' : ''}
+                  </p>
                 </div>
               </div>
             </div>
 
             <Card title="현재 데이터 상태">
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-3 text-sm">
                 <div className="bg-toss-gray/50 p-3 rounded-xl border border-gray-100">
-                  <p className="text-[10px] text-toss-subtext font-bold mb-1">USD 시작일</p>
-                  <p className="font-bold text-toss-text truncate">{firstDateUsd}</p>
+                  <p className="text-[10px] text-toss-subtext font-bold mb-1">USD 원본 시작일</p>
+                  <p className="font-bold text-toss-text truncate">{dInfo.usdRawStartDate || 'N/A'}</p>
                 </div>
                 <div className="bg-toss-gray/50 p-3 rounded-xl border border-gray-100">
                   <p className="text-[10px] text-toss-subtext font-bold mb-1">KRW 유효 시작일</p>
-                  <p className="font-bold text-toss-text truncate">{firstValidKrwDate}</p>
+                  <p className="font-bold text-toss-text truncate">{dInfo.krwRawStartDate || 'N/A'}</p>
                 </div>
                 <div className="bg-toss-gray/50 p-3 rounded-xl border border-gray-100">
-                  <p className="text-[10px] text-toss-subtext font-bold mb-1">현재 분석 범위</p>
-                  <p className="font-bold text-toss-text text-[11px] mt-0.5 truncate">{settings.startDate} ~ {settings.endDate}</p>
+                  <p className="text-[10px] text-toss-subtext font-bold mb-1">사용자 요청 시작일</p>
+                  <p className="font-bold text-toss-text truncate">{dInfo.requestedStartDate || 'N/A'}</p>
+                </div>
+                <div className="bg-toss-gray/50 p-3 rounded-xl border border-gray-100">
+                  <p className="text-[10px] text-toss-subtext font-bold mb-1">USD 실분석 시작일</p>
+                  <p className="font-bold text-toss-text truncate">{dInfo.usdEffectiveStartDate || 'N/A'}</p>
                 </div>
                 <div className="bg-toss-gray/50 p-3 rounded-xl border border-gray-100">
                   <p className="text-[10px] text-toss-subtext font-bold mb-1">KRW 실분석 시작일</p>
-                  <p className="font-bold text-toss-text truncate">{krwActualStartDate}</p>
+                  <p className="font-bold text-toss-text truncate">{dInfo.krwEffectiveStartDate || 'N/A'}</p>
                 </div>
               </div>
             </Card>
 
             {fetchStatus.error ? (
               <div className="bg-yellow-50 text-yellow-800 p-4 rounded-xl text-sm font-semibold border border-yellow-200">
-                ⚠️ {fetchStatus.error}
+                ⚠️ 정적 JSON 로드 실패: {fetchStatus.error} → 현재는 SPY 샘플 데이터로 동작 중입니다.
               </div>
             ) : null}
 
@@ -1474,53 +1498,28 @@
           }
         }
 
+        const dateInfo = appState.dateInfo || {};
+        const { usdRawStartDate, krwRawStartDate, requestedStartDate, usdEffectiveStartDate, krwEffectiveStartDate } = dateInfo;
+
         const validBandStep = Number.isFinite(Number(settings.bandStep)) && Number(settings.bandStep) > 0;
-        const rangeIncludes = rawData.length > 0
-          ? (settings.startDate >= rawData[0].date && settings.endDate <= rawData[rawData.length - 1].date)
-          : false;
-
-        const firstValidKrwDate = getFirstValidKrwDate(rawData);
-
-        let isNullBeforeFirstValid = true;
-        let isNumberAfterFirstValid = true;
-
-        if (firstValidKrwDate) {
-          const firstIndex = rawData.findIndex(r => r.date === firstValidKrwDate);
-          for (let i = 0; i < firstIndex; i++) {
-            if (rawData[i].closeKrw !== null) {
-              isNullBeforeFirstValid = false;
-              break;
-            }
-          }
-          for (let i = firstIndex; i < rawData.length; i++) {
-            if (rawData[i].closeKrw === null || !Number.isFinite(rawData[i].closeKrw)) {
-              isNumberAfterFirstValid = false;
-              break;
-            }
-          }
-        }
-
+        
         const engine = appState.primaryEngine;
-        const krwEngine = appState.krwEngine;
-        const krwEngineCorrectStartDate = krwEngine && firstValidKrwDate
-          ? (krwEngine.timeSeries.length === 0 || krwEngine.timeSeries[0].date >= firstValidKrwDate)
-          : true;
 
         const tests = [
-          { id: 'F1', name: 'Assets 목록 준비', expected: 'TRUE', actual: assetsList.length > 0 ? 'TRUE' : 'FALSE', pass: assetsList.length > 0 },
-          { id: 'F2', name: '선택 자산 Price 로드', expected: 'TRUE', actual: fetchStatus.price === true ? 'TRUE' : (dataSource === 'SAMPLE' || dataSource === 'IMPORTED' ? 'SKIP' : 'FALSE'), pass: dataSource === 'SAMPLE' || dataSource === 'IMPORTED' ? null : fetchStatus.price === true },
-          { id: 'F3', name: 'USDKRW 환율 로드', expected: 'TRUE', actual: fetchStatus.fx === true ? 'TRUE' : (dataSource === 'SAMPLE' || dataSource === 'IMPORTED' ? 'SKIP' : 'FALSE'), pass: dataSource === 'SAMPLE' || dataSource === 'IMPORTED' ? null : fetchStatus.fx === true },
-          { id: 'D1', name: '날짜 오름차순 정렬', expected: 'TRUE', actual: isAscending ? 'TRUE' : 'FALSE', pass: isAscending },
-          { id: 'D2', name: '가격 양수 여부', expected: 'TRUE', actual: isPositive ? 'TRUE' : 'FALSE', pass: isPositive },
-          { id: 'D3', name: '유효한 Band Step', expected: 'TRUE', actual: validBandStep ? 'TRUE' : 'FALSE', pass: validBandStep },
-          { id: 'D4', name: '분석 날짜 범위 포함', expected: 'TRUE', actual: rangeIncludes ? 'TRUE' : 'FALSE', pass: rangeIncludes },
-          { id: 'K1', name: 'KRW 최초 유효일 존재 여부', expected: 'TRUE', actual: firstValidKrwDate ? 'TRUE' : 'FALSE', pass: !!firstValidKrwDate },
-          { id: 'K2', name: '최초 KRW 이전 closeKrw === null', expected: 'TRUE', actual: isNullBeforeFirstValid ? 'TRUE' : 'FALSE', pass: isNullBeforeFirstValid },
-          { id: 'K3', name: '최초 KRW 이후 정상 숫자 여부', expected: 'TRUE', actual: isNumberAfterFirstValid ? 'TRUE' : 'FALSE', pass: isNumberAfterFirstValid },
-          { id: 'K4', name: 'KRW 엔진 자동 보정된 시작일 실행', expected: 'TRUE', actual: krwEngineCorrectStartDate ? 'TRUE' : 'FALSE', pass: krwEngineCorrectStartDate },
-          { id: 'E1', name: '엔진 실행 성공', expected: 'TRUE', actual: engine ? 'TRUE' : 'FALSE', pass: engine ? true : false },
-          { id: 'E2', name: 'MDD <= 0', expected: '<= 0', actual: engine ? engine.metrics.mdd.toFixed(4) : 'N/A', pass: engine ? engine.metrics.mdd <= 0 : null },
-          { id: 'E3', name: '최종 Buy Signal 연산', expected: appState.gates.finalSignal ? 'TRUE' : 'FALSE', actual: (appState.gates.lifeGate && appState.gates.marketGate) ? 'TRUE' : 'FALSE', pass: appState.gates.finalSignal === (appState.gates.lifeGate && appState.gates.marketGate) }
+          { id: 'F1', name: 'Assets 목록 로드 성공 여부', expected: 'TRUE', actual: fetchStatus.assets === true ? 'TRUE' : 'FALSE', pass: fetchStatus.assets === true },
+          { id: 'F2', name: '선택 자산 Price 로드 성공 여부', expected: 'TRUE', actual: fetchStatus.price === true ? 'TRUE' : (dataSource === 'SAMPLE' || dataSource === 'IMPORTED' ? 'SKIP' : 'FALSE'), pass: dataSource === 'SAMPLE' || dataSource === 'IMPORTED' ? null : fetchStatus.price === true },
+          { id: 'F3', name: 'USDKRW 환율 로드 성공 여부', expected: 'TRUE', actual: fetchStatus.fx === true ? 'TRUE' : (dataSource === 'SAMPLE' || dataSource === 'IMPORTED' ? 'SKIP' : 'FALSE'), pass: dataSource === 'SAMPLE' || dataSource === 'IMPORTED' ? null : fetchStatus.fx === true },
+          { id: 'D1', name: '날짜 오름차순 정렬 여부', expected: 'TRUE', actual: isAscending ? 'TRUE' : 'FALSE', pass: isAscending },
+          { id: 'D2', name: '가격 양수 여부 검증', expected: 'TRUE', actual: isPositive ? 'TRUE' : 'FALSE', pass: isPositive },
+          { id: 'D3', name: '유효한 Band Step 검증', expected: 'TRUE', actual: validBandStep ? 'TRUE' : 'FALSE', pass: validBandStep },
+          { id: 'K1', name: 'KRW 유효 시작일 존재 여부', expected: 'TRUE', actual: krwRawStartDate ? 'TRUE' : 'FALSE', pass: !!krwRawStartDate },
+          { id: 'K2', name: 'KRW 실분석 시작일 >= KRW 유효 시작일', expected: 'TRUE', actual: `${krwEffectiveStartDate} >= ${krwRawStartDate}`, pass: krwEffectiveStartDate >= krwRawStartDate },
+          { id: 'K3', name: 'KRW 실분석 시작일 >= USD 원본 시작일', expected: 'TRUE', actual: `${krwEffectiveStartDate} >= ${usdRawStartDate}`, pass: krwEffectiveStartDate >= usdRawStartDate },
+          { id: 'K4', name: 'USD 실분석 시작일 >= USD 원본 시작일', expected: 'TRUE', actual: `${usdEffectiveStartDate} >= ${usdRawStartDate}`, pass: usdEffectiveStartDate >= usdRawStartDate },
+          { id: 'K5', name: '사용자 요청 시작일 정상 반영 여부', expected: 'TRUE', actual: requestedStartDate > usdRawStartDate ? `${usdEffectiveStartDate} === ${requestedStartDate}` : 'TRUE', pass: requestedStartDate > usdRawStartDate ? usdEffectiveStartDate === requestedStartDate : true },
+          { id: 'E1', name: '엔진 실행 성공 여부', expected: 'TRUE', actual: engine ? 'TRUE' : 'FALSE', pass: engine ? true : false },
+          { id: 'E2', name: '계산된 MDD가 0 이하인지', expected: '<= 0', actual: engine ? engine.metrics.mdd.toFixed(4) : 'N/A', pass: engine ? engine.metrics.mdd <= 0 : null },
+          { id: 'E3', name: '최종 Buy Signal 논리 일치 여부', expected: appState.gates.finalSignal ? 'TRUE' : 'FALSE', actual: (appState.gates.lifeGate && appState.gates.marketGate) ? 'TRUE' : 'FALSE', pass: appState.gates.finalSignal === (appState.gates.lifeGate && appState.gates.marketGate) }
         ];
 
         return (
