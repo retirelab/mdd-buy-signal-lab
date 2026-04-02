@@ -99,9 +99,6 @@
   <script type="text/babel" data-presets="react,env">
     const { useState, useMemo, useEffect, useRef } = React;
 
-    // ------------------------------
-    // Error Boundary
-    // ------------------------------
     class ErrorBoundary extends React.Component {
       constructor(props) {
         super(props);
@@ -134,16 +131,16 @@
       }
     }
 
-    // ------------------------------
-    // Constants
-    // ------------------------------
+    const THRESHOLD_SCALE = 10000;
+
     const DEFAULT_SETTINGS = {
       symbol: 'SPY',
       startDate: '2010-01-01',
       endDate: '2026-12-31',
       targetWinRateEtf: 0.80,
       targetWinRateStock: 0.90,
-      bandStep: 0.05,
+      engineStep: 0.01,
+      tableDisplayStep: 0.05,
       assetType: 'ETF',
       currencyMode: 'BOTH',
       primarySignalMode: 'USD',
@@ -153,18 +150,13 @@
     };
 
     const FALLBACK_ASSETS = [
-      { symbol: 'SPY', name: 'SPDR S&P 500 ETF Trust', assetType: 'ETF', enabled: true, defaultTargetWinRate: 0.80, defaultBandStep: 0.05 },
-      { symbol: 'QQQ', name: 'Invesco QQQ Trust', assetType: 'ETF', enabled: true, defaultTargetWinRate: 0.80, defaultBandStep: 0.05 },
-      { symbol: 'HYG', name: 'iShares iBoxx $ High Yield Corporate Bond ETF', assetType: 'ETF', enabled: true, defaultTargetWinRate: 0.80, defaultBandStep: 0.05 },
-      { symbol: 'GLD', name: 'SPDR Gold Shares', assetType: 'ETF', enabled: true, defaultTargetWinRate: 0.80, defaultBandStep: 0.05 },
-      { symbol: 'TLT', name: 'iShares 20+ Year Treasury Bond ETF', assetType: 'ETF', enabled: true, defaultTargetWinRate: 0.80, defaultBandStep: 0.05 }
+      { symbol: 'SPY', name: 'SPDR S&P 500 ETF Trust', assetType: 'ETF', enabled: true, defaultTargetWinRate: 0.80, defaultEngineStep: 0.01, defaultTableDisplayStep: 0.05 },
+      { symbol: 'QQQ', name: 'Invesco QQQ Trust', assetType: 'ETF', enabled: true, defaultTargetWinRate: 0.80, defaultEngineStep: 0.01, defaultTableDisplayStep: 0.05 },
+      { symbol: 'HYG', name: 'iShares iBoxx $ High Yield Corporate Bond ETF', assetType: 'ETF', enabled: true, defaultTargetWinRate: 0.80, defaultEngineStep: 0.01, defaultTableDisplayStep: 0.05 },
+      { symbol: 'GLD', name: 'SPDR Gold Shares', assetType: 'ETF', enabled: true, defaultTargetWinRate: 0.80, defaultEngineStep: 0.01, defaultTableDisplayStep: 0.05 },
+      { symbol: 'TLT', name: 'iShares 20+ Year Treasury Bond ETF', assetType: 'ETF', enabled: true, defaultTargetWinRate: 0.80, defaultEngineStep: 0.01, defaultTableDisplayStep: 0.05 }
     ];
 
-    const THRESHOLD_SCALE = 10000;
-
-    // ------------------------------
-    // Sample Data
-    // ------------------------------
     function generateSampleData(symbol) {
       const arr = [];
       let seed = 0;
@@ -197,9 +189,6 @@
       return arr;
     }
 
-    // ------------------------------
-    // Storage
-    // ------------------------------
     function getSafeLocalStorage() {
       try { return window.localStorage; } catch (e) { return null; }
     }
@@ -236,9 +225,6 @@
       return [storedValue, setValue];
     }
 
-    // ------------------------------
-    // Helpers
-    // ------------------------------
     function isValidPositiveNumber(value) {
       return (
         value !== null &&
@@ -249,43 +235,6 @@
       );
     }
 
-    function thresholdToInt(value) {
-      return Math.round(Number(value) * THRESHOLD_SCALE);
-    }
-
-    // [PATCH] 레거시 키 호환
-    function normalizeSettingsShape(source) {
-      const s = source || {};
-      const next = { ...DEFAULT_SETTINGS };
-
-      next.symbol = typeof s.symbol === 'string' && s.symbol ? s.symbol : DEFAULT_SETTINGS.symbol;
-      next.startDate = typeof s.startDate === 'string' && s.startDate ? s.startDate : DEFAULT_SETTINGS.startDate;
-      next.endDate = typeof s.endDate === 'string' && s.endDate ? s.endDate : DEFAULT_SETTINGS.endDate;
-
-      next.targetWinRateEtf =
-        Number.isFinite(Number(s.targetWinRateEtf)) ? Number(s.targetWinRateEtf) :
-        Number.isFinite(Number(s.targetRecoveryEtf)) ? Number(s.targetRecoveryEtf) :
-        DEFAULT_SETTINGS.targetWinRateEtf;
-
-      next.targetWinRateStock =
-        Number.isFinite(Number(s.targetWinRateStock)) ? Number(s.targetWinRateStock) :
-        Number.isFinite(Number(s.targetRecoveryStock)) ? Number(s.targetRecoveryStock) :
-        DEFAULT_SETTINGS.targetWinRateStock;
-
-      next.bandStep = Number.isFinite(Number(s.bandStep)) ? Number(s.bandStep) : DEFAULT_SETTINGS.bandStep;
-      next.assetType = s.assetType === 'STOCK' ? 'STOCK' : 'ETF';
-      next.currencyMode = ['BOTH', 'USD', 'KRW'].includes(s.currencyMode) ? s.currencyMode : DEFAULT_SETTINGS.currencyMode;
-      next.primarySignalMode = ['USD', 'KRW'].includes(s.primarySignalMode) ? s.primarySignalMode : DEFAULT_SETTINGS.primarySignalMode;
-      next.fearGreedIndex = ['Extreme Fear', 'Fear', 'Neutral'].includes(s.fearGreedIndex) ? s.fearGreedIndex : DEFAULT_SETTINGS.fearGreedIndex;
-      next.cashReady = typeof s.cashReady === 'boolean' ? s.cashReady : DEFAULT_SETTINGS.cashReady;
-      next.incomeGreater = typeof s.incomeGreater === 'boolean' ? s.incomeGreater : DEFAULT_SETTINGS.incomeGreater;
-
-      return next;
-    }
-
-    // ------------------------------
-    // Utils
-    // ------------------------------
     function formatPct(val) {
       if (val === null || val === undefined || !Number.isFinite(val)) return '-';
       return (val * 100).toFixed(2) + '%';
@@ -305,6 +254,19 @@
       const valid = dates.filter(Boolean);
       if (valid.length === 0) return null;
       return valid.sort((a, b) => a.localeCompare(b))[valid.length - 1];
+    }
+
+    function toThresholdInt(value) {
+      return Math.round(Number(value) * THRESHOLD_SCALE);
+    }
+
+    function fromThresholdInt(valueInt) {
+      return Number((valueInt / THRESHOLD_SCALE).toFixed(4));
+    }
+
+    function sameThreshold(a, b) {
+      if (a === null || a === undefined || b === null || b === undefined) return false;
+      return toThresholdInt(a) === toThresholdInt(b);
     }
 
     function filterRawDataByDateRange(data, start, end, priceKey) {
@@ -402,21 +364,8 @@
       return sorted[mid];
     }
 
-    // ------------------------------
-    // Win Rate Engine
-    // ------------------------------
-    function buildAverageDownWinRateTable(timeSeries, step) {
-      if (!timeSeries || timeSeries.length === 0) return [];
-
-      const stepNum = Number(step);
-      if (!Number.isFinite(stepNum) || stepNum <= 0) return [];
-
-      const stepInt = Math.round(stepNum * THRESHOLD_SCALE);
-      if (stepInt <= 0) return [];
-
-      const ddValues = timeSeries.map((x) => x.dd);
-      const minDd = Math.min.apply(null, ddValues);
-
+    function buildThresholdList(minDd, step) {
+      const stepInt = Math.max(1, toThresholdInt(step));
       const deepestInt = Math.max(
         stepInt,
         Math.ceil((Math.abs(minDd) * THRESHOLD_SCALE) / stepInt) * stepInt
@@ -424,10 +373,31 @@
 
       const thresholds = [];
       for (let depthInt = stepInt; depthInt <= deepestInt; depthInt += stepInt) {
-        thresholds.push(-(depthInt / THRESHOLD_SCALE));
+        thresholds.push(-fromThresholdInt(depthInt));
       }
+      return thresholds;
+    }
 
-      const table = thresholds.map((threshold) => {
+    function getCurrentBandThreshold(currentDd, engineStep) {
+      if (!Number.isFinite(currentDd) || !Number.isFinite(engineStep) || engineStep <= 0) return null;
+      if (Math.abs(currentDd) < engineStep) return null;
+
+      const stepInt = Math.max(1, toThresholdInt(engineStep));
+      const currentAbsInt = Math.floor(Math.abs(currentDd) * THRESHOLD_SCALE + 0.0001);
+      const bandInt = Math.floor(currentAbsInt / stepInt) * stepInt;
+
+      if (bandInt < stepInt) return null;
+      return -fromThresholdInt(bandInt);
+    }
+
+    function buildAverageDownWinRateTable(timeSeries, engineStep) {
+      if (!timeSeries || timeSeries.length === 0) return [];
+
+      const ddValues = timeSeries.map((x) => x.dd);
+      const minDd = Math.min.apply(null, ddValues);
+      const thresholds = buildThresholdList(minDd, engineStep);
+
+      return thresholds.map((threshold) => {
         const signalIndexes = [];
 
         for (let i = 0; i < timeSeries.length; i++) {
@@ -469,6 +439,7 @@
 
         return {
           threshold,
+          thresholdInt: toThresholdInt(threshold),
           signalCount,
           winCount,
           loseCount,
@@ -477,13 +448,42 @@
           medianRecoveryDays
         };
       });
+    }
 
-      return table;
+    function buildDisplayWinRateTable(fullTable, engineStep, tableDisplayStep, targetDd, currentBandThreshold) {
+      if (!fullTable || fullTable.length === 0) return [];
+
+      const everyN = Math.max(1, Math.round(Number(tableDisplayStep) / Number(engineStep)));
+      if (fullTable.length <= Math.max(30, everyN * 8)) return fullTable;
+
+      const includeIndexes = new Set();
+
+      for (let i = 0; i < fullTable.length; i += everyN) {
+        includeIndexes.add(i);
+      }
+
+      includeIndexes.add(0);
+      includeIndexes.add(fullTable.length - 1);
+
+      function addWindow(centerIndex, radius) {
+        if (centerIndex < 0) return;
+        for (let i = centerIndex - radius; i <= centerIndex + radius; i++) {
+          if (i >= 0 && i < fullTable.length) includeIndexes.add(i);
+        }
+      }
+
+      const targetIndex = fullTable.findIndex((r) => sameThreshold(r.threshold, targetDd));
+      const currentIndex = fullTable.findIndex((r) => sameThreshold(r.threshold, currentBandThreshold));
+
+      addWindow(targetIndex, 3);
+      addWindow(currentIndex, 3);
+
+      return fullTable.filter((_, idx) => includeIndexes.has(idx));
     }
 
     function runEngine(rawData, priceKey, analysisStart, analysisEnd, settings) {
-      const step = Number(settings.bandStep);
-      if (!Number.isFinite(step) || step <= 0) return null;
+      const engineStep = Number(settings.engineStep);
+      if (!Number.isFinite(engineStep) || engineStep <= 0) return null;
       if (!analysisStart || !analysisEnd) return null;
 
       const data = filterRawDataByDateRange(rawData, analysisStart, analysisEnd, priceKey);
@@ -492,6 +492,7 @@
       let ath = -Infinity;
       let mdd = 0;
       let mddDate = null;
+      let mddIndex = null;
       const ddArray = [];
       const timeSeries = [];
 
@@ -500,6 +501,7 @@
         const price = Number(d[priceKey]);
 
         if (!isValidPositiveNumber(price)) continue;
+
         if (price > ath) ath = price;
         if (!(ath > 0)) continue;
 
@@ -511,9 +513,15 @@
         if (dd < mdd) {
           mdd = dd;
           mddDate = d.date;
+          mddIndex = timeSeries.length;
         }
 
-        timeSeries.push({ date: d.date, price, ath, dd });
+        timeSeries.push({
+          date: d.date,
+          price,
+          ath,
+          dd
+        });
       }
 
       if (timeSeries.length === 0) return null;
@@ -522,7 +530,7 @@
       const currentDd = timeSeries[timeSeries.length - 1].dd;
       const avgDd = ddArray.reduce((sum, val) => sum + val, 0) / ddArray.length;
 
-      const winRateTableShallowToDeep = buildAverageDownWinRateTable(timeSeries, step);
+      const winRateTableFull = buildAverageDownWinRateTable(timeSeries, engineStep);
 
       const targetWinRate =
         settings.assetType === 'ETF'
@@ -530,8 +538,8 @@
           : Number(settings.targetWinRateStock);
 
       let targetRow = null;
-      for (let i = 0; i < winRateTableShallowToDeep.length; i++) {
-        const row = winRateTableShallowToDeep[i];
+      for (let i = 0; i < winRateTableFull.length; i++) {
+        const row = winRateTableFull[i];
         if (row.signalCount > 0 && row.winRate !== null && row.winRate >= targetWinRate) {
           targetRow = row;
           break;
@@ -539,30 +547,45 @@
       }
 
       if (!targetRow) {
-        const rowsWithSignals = winRateTableShallowToDeep.filter((r) => r.signalCount > 0);
+        const rowsWithSignals = winRateTableFull.filter((r) => r.signalCount > 0);
         targetRow = rowsWithSignals.length > 0 ? rowsWithSignals[rowsWithSignals.length - 1] : null;
       }
 
       const targetDd = targetRow ? targetRow.threshold : null;
       const targetPrice = targetDd !== null ? ath * (1 + targetDd) : null;
-
-      // [PATCH] remainingDrop -> gapToTarget
-      // 양수: 아직 더 떨어져야 목표 도달
-      // 0 또는 음수: 이미 목표 도달
       const gapToTarget = (targetPrice !== null && currentPrice > 0)
         ? (currentPrice - targetPrice) / currentPrice
         : null;
 
+      const currentBandThreshold = getCurrentBandThreshold(currentDd, engineStep);
+
+      const winRateTableDisplay = buildDisplayWinRateTable(
+        winRateTableFull,
+        Number(settings.engineStep),
+        Number(settings.tableDisplayStep),
+        targetDd,
+        currentBandThreshold
+      );
+
       return {
-        metrics: { ath, currentPrice, currentDd, mdd, mddDate, avgDd },
+        metrics: {
+          ath,
+          currentPrice,
+          currentDd,
+          mdd,
+          mddDate,
+          mddIndex,
+          avgDd
+        },
         analysisStart,
         analysisEnd,
-        winRateTable: [...winRateTableShallowToDeep].reverse(),
+        currentBandThreshold,
+        winRateTableFull,
+        winRateTableDisplay,
         target: {
-          winRateTarget: targetWinRate,
+          targetWinRate,
           dd: targetDd,
           price: targetPrice,
-          ddGap: targetDd !== null ? targetDd - currentDd : null,
           gapToTarget,
           isTriggered: targetDd !== null ? currentDd <= targetDd : false,
           signalCount: targetRow ? targetRow.signalCount : 0,
@@ -574,9 +597,6 @@
       };
     }
 
-    // ------------------------------
-    // UI Components
-    // ------------------------------
     function Card({ title, children, className = '', titleRight = null }) {
       return (
         <div className={`bg-white rounded-2xl shadow-card p-5 md:p-6 mb-6 ${className}`}>
@@ -607,7 +627,8 @@
         blue: active ? 'bg-toss-blue text-white' : 'bg-toss-light text-toss-blue',
         gray: active ? 'bg-gray-500 text-white' : 'bg-toss-gray text-toss-subtext',
         red: active ? 'bg-red-500 text-white' : 'bg-red-50 text-red-500',
-        green: active ? 'bg-green-500 text-white' : 'bg-green-50 text-green-600'
+        green: active ? 'bg-green-500 text-white' : 'bg-green-50 text-green-600',
+        amber: active ? 'bg-amber-500 text-white' : 'bg-amber-50 text-amber-700'
       };
       return (
         <span className={`px-3 py-1.5 rounded-full text-xs font-bold whitespace-nowrap ${colors[color]}`}>
@@ -625,42 +646,52 @@
     function DrawdownSvgChart({ data, targetDd, mode }) {
       if (!data || data.length === 0) {
         return (
-          <div className="flex justify-center items-center h-48 md:h-56 mt-6 bg-toss-gray/50 rounded-xl text-toss-subtext text-sm">
+          <div className="flex justify-center items-center h-56 mt-6 bg-toss-gray/50 rounded-xl text-toss-subtext text-sm">
             차트 데이터 없음
           </div>
         );
       }
 
       const svgWidth = 1000;
-      const svgHeight = 240;
+      const svgHeight = 260;
       const padTop = 20;
-      const padBottom = 20;
-      const labelWidthPct = 12;
+      const padBottom = 24;
+      const labelWidthPct = 13;
       const padLeft = 0;
       const padRight = svgWidth * (labelWidthPct / 100);
       const drawWidth = svgWidth - padLeft - padRight;
       const drawHeight = svgHeight - padTop - padBottom;
 
-      const chartData = data.filter((_, i) => i % Math.max(1, Math.floor(data.length / 200)) === 0);
+      const sampleEvery = Math.max(1, Math.floor(data.length / 220));
+      const chartData = data.filter((_, i) => i % sampleEvery === 0);
       if (chartData[chartData.length - 1].date !== data[data.length - 1].date) {
         chartData.push(data[data.length - 1]);
       }
 
       const n = chartData.length;
-      let actualMdd = 0;
-      chartData.forEach((d) => { if (d.dd < actualMdd) actualMdd = d.dd; });
+      const currentPoint = chartData[chartData.length - 1];
 
-      const compareTarget = (targetDd !== null && targetDd !== undefined) ? targetDd : -0.10;
-      const minDdForScale = Math.min(actualMdd, compareTarget, -0.05);
-      const yMin = minDdForScale * 1.1;
+      let mddPoint = chartData[0];
+      chartData.forEach((d) => {
+        if (d.dd < mddPoint.dd) mddPoint = d;
+      });
+
+      const compareCandidates = [mddPoint.dd, currentPoint.dd, -0.05];
+      if (Number.isFinite(targetDd)) compareCandidates.push(targetDd);
+      const minDdForScale = Math.min.apply(null, compareCandidates);
+      const yMin = minDdForScale * 1.12;
       const yRange = 0 - yMin;
 
       const getX = (i) => padLeft + (n > 1 ? (i / (n - 1)) * drawWidth : 0);
       const getY = (dd) => padTop + ((-dd) / yRange) * drawHeight;
 
       const y0 = getY(0);
-      const yTarget = getY(compareTarget);
-      const yMdd = getY(actualMdd);
+      const yTarget = Number.isFinite(targetDd) ? getY(targetDd) : null;
+      const yCurrent = getY(currentPoint.dd);
+      const yMdd = getY(mddPoint.dd);
+
+      const xCurrent = getX(chartData.length - 1);
+      const xMdd = getX(chartData.findIndex((d) => d.date === mddPoint.date && d.dd === mddPoint.dd));
 
       const isUSD = mode === 'USD';
       const strokeColor = isUSD ? '#3182f6' : '#20c997';
@@ -669,43 +700,68 @@
       const linePoints = chartData.map((d, i) => `${getX(i)},${getY(d.dd)}`).join(' L ');
       const linePath = `M ${linePoints}`;
       const areaPath = `M ${getX(0)},${y0} L ${linePoints} L ${getX(n - 1)},${y0} Z`;
-      const toPct = (val) => `${(val / svgHeight) * 100}%`;
+
+      const clampYText = (value) => Math.max(12, Math.min(svgHeight - 8, value));
+      const rightLabelTop = (val) => `calc(${(val / svgHeight) * 100}% - 8px)`;
 
       return (
-        <div className="h-48 md:h-56 mt-6 w-full relative pointer-events-none select-none">
+        <div className="h-56 md:h-64 mt-6 w-full relative select-none">
           <svg viewBox={`0 0 ${svgWidth} ${svgHeight}`} className="w-full h-full overflow-visible" preserveAspectRatio="none">
-            <path d={areaPath} fill={fillColor} opacity="0.6" />
+            <path d={areaPath} fill={fillColor} opacity="0.62" />
             <line x1={0} y1={y0} x2={drawWidth} y2={y0} stroke="#e5e8eb" strokeWidth="2" strokeDasharray="4 4" vectorEffect="non-scaling-stroke" />
-            <line x1={0} y1={yTarget} x2={drawWidth} y2={yTarget} stroke="#f04452" strokeWidth="2" strokeDasharray="4 4" vectorEffect="non-scaling-stroke" />
+            {Number.isFinite(yTarget) && (
+              <line x1={0} y1={yTarget} x2={drawWidth} y2={yTarget} stroke="#f04452" strokeWidth="2" strokeDasharray="5 5" vectorEffect="non-scaling-stroke" />
+            )}
             <path d={linePath} fill="none" stroke={strokeColor} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
+
+            {Number.isFinite(yTarget) && (
+              <circle cx={xCurrent} cy={yTarget} r="4.5" fill="#f04452" />
+            )}
+
+            <circle cx={xCurrent} cy={yCurrent} r="4.5" fill={strokeColor} />
+            <circle cx={xMdd} cy={yMdd} r="5" fill="#ef4444" />
+
+            <text x={Math.max(10, xCurrent - 88)} y={clampYText(yCurrent - 10)} fontSize="16" fontWeight="700" fill={strokeColor}>
+              Now {formatPct(currentPoint.dd)}
+            </text>
+
+            <text x={Math.min(drawWidth - 70, xMdd + 8)} y={clampYText(yMdd - 10)} fontSize="16" fontWeight="700" fill="#ef4444">
+              MDD {formatPct(mddPoint.dd)}
+            </text>
+
+            {Number.isFinite(yTarget) && (
+              <text x={Math.max(10, xCurrent - 95)} y={clampYText(yTarget - 10)} fontSize="16" fontWeight="700" fill="#f04452">
+                Target {formatPct(targetDd)}
+              </text>
+            )}
           </svg>
+
           <div className="absolute top-0 right-0 h-full flex flex-col" style={{ width: `${labelWidthPct}%` }}>
-            <div className="absolute right-0 text-xs text-toss-subtext font-medium bg-white/80 px-1 rounded" style={{ top: `calc(${toPct(y0)} - 8px)` }}>
-              0%
-            </div>
-            <div className="absolute right-0 text-xs text-red-500 font-bold bg-white/80 px-1 rounded" style={{ top: `calc(${toPct(yTarget)} - 8px)` }}>
-              {(compareTarget * 100).toFixed(0)}%
-            </div>
-            <div className="absolute right-0 text-[10px] text-toss-subtext bg-white/80 px-1 rounded" style={{ top: `calc(${toPct(yMdd)} - 6px)` }}>
-              {(actualMdd * 100).toFixed(1)}%
+            <div className="absolute right-0 text-xs text-toss-subtext font-medium bg-white/80 px-1 rounded" style={{ top: rightLabelTop(y0) }}>0%</div>
+            {Number.isFinite(yTarget) && (
+              <div className="absolute right-0 text-xs text-red-500 font-bold bg-white/80 px-1 rounded" style={{ top: rightLabelTop(yTarget) }}>
+                {formatPct(targetDd)}
+              </div>
+            )}
+            <div className="absolute right-0 text-[10px] text-toss-subtext bg-white/80 px-1 rounded" style={{ top: rightLabelTop(yMdd) }}>
+              {formatPct(mddPoint.dd)}
             </div>
           </div>
         </div>
       );
     }
 
-    // ------------------------------
-    // App
-    // ------------------------------
     function App() {
       useEffect(() => { window.__APP_MOUNTED__ = true; }, []);
 
       const [activeTab, setActiveTab] = useState('dashboard');
-      const [storedSettings, setStoredSettings] = useLocalStorage('mdd_settings_winrate_v3', DEFAULT_SETTINGS);
+      const [settings, setSettings] = useLocalStorage('mdd_settings_winrate_v5', DEFAULT_SETTINGS);
       const [reloadToken, setReloadToken] = useState(0);
 
       const [rawData, setRawData] = useState([]);
       const [dataSource, setDataSource] = useState('LOADING');
+      const [manualMode, setManualMode] = useState(null); // null | SAMPLE | IMPORTED
+
       const [assetsList, setAssetsList] = useState(FALLBACK_ASSETS);
       const [fetchStatus, setFetchStatus] = useState({
         assets: null,
@@ -716,12 +772,6 @@
 
       const [fallbackSampleData] = useState(() => generateSampleData('SPY'));
       const fileInputRef = useRef(null);
-
-      const settings = useMemo(() => normalizeSettingsShape(storedSettings), [storedSettings]);
-
-      function patchSettings(patch) {
-        setStoredSettings((prev) => normalizeSettingsShape({ ...prev, ...patch }));
-      }
 
       useEffect(() => {
         let isCancelled = false;
@@ -738,27 +788,23 @@
             }
           })
           .catch(() => {
-            if (isCancelled) return;
-            setFetchStatus((prev) => ({ ...prev, assets: false }));
+            if (!isCancelled) {
+              setFetchStatus((prev) => ({ ...prev, assets: false }));
+            }
           });
 
         return () => { isCancelled = true; };
       }, []);
 
       useEffect(() => {
-        if (dataSource === 'IMPORTED') return;
+        if (manualMode === 'IMPORTED' || manualMode === 'SAMPLE') return;
 
         let isCancelled = false;
 
         async function loadPriceAndFx() {
           setDataSource('LOADING');
 
-          const nextStatus = {
-            assets: fetchStatus.assets,
-            price: false,
-            fx: false,
-            error: null
-          };
+          const nextStatus = { assets: fetchStatus.assets, price: false, fx: false, error: null };
 
           try {
             const [priceRes, fxRes] = await Promise.all([
@@ -802,7 +848,7 @@
         loadPriceAndFx();
 
         return () => { isCancelled = true; };
-      }, [settings.symbol, reloadToken]);
+      }, [settings.symbol, reloadToken, manualMode]);
 
       const meta = useMemo(
         () => getDataMeta(rawData, settings.startDate),
@@ -814,10 +860,13 @@
         let krwEngine = null;
         let configWarning = null;
 
-        const safeBandStep = Number(settings.bandStep);
+        const safeEngineStep = Number(settings.engineStep);
+        const safeTableStep = Number(settings.tableDisplayStep);
 
-        if (!Number.isFinite(safeBandStep) || safeBandStep <= 0) {
-          configWarning = 'Band Step은 0보다 큰 숫자여야 합니다.';
+        if (!Number.isFinite(safeEngineStep) || safeEngineStep <= 0) {
+          configWarning = '승률 엔진 단위는 0보다 큰 숫자여야 합니다.';
+        } else if (!Number.isFinite(safeTableStep) || safeTableStep <= 0) {
+          configWarning = '테이블 표시 간격은 0보다 큰 숫자여야 합니다.';
         } else if (dataSource !== 'LOADING') {
           if (settings.currencyMode === 'USD' || settings.currencyMode === 'BOTH') {
             usdEngine = runEngine(rawData, 'closeUsd', meta.usdAnalysisStart, settings.endDate, settings);
@@ -843,46 +892,55 @@
         const marketGate = fearGate && ddGate;
         const finalSignal = lifeGate && marketGate;
 
-        return { usdEngine, krwEngine, primaryEngine, configWarning, gates: { lifeGate, fearGate, ddGate, marketGate, finalSignal } };
+        return {
+          usdEngine,
+          krwEngine,
+          primaryEngine,
+          configWarning,
+          gates: { lifeGate, fearGate, ddGate, marketGate, finalSignal }
+        };
       }, [rawData, settings, dataSource, meta]);
 
       function handleSettingChange(e) {
         const { name, value, type, checked } = e.target;
-        patchSettings({
+        setSettings((prev) => ({
+          ...prev,
           [name]: type === 'checkbox' ? checked : (type === 'number' ? Number(value) : value)
-        });
+        }));
       }
 
       function handleAssetChange(e) {
         const symbol = e.target.value;
         const assetInfo = assetsList.find((a) => a.symbol === symbol);
 
-        const patch = { symbol };
-        if (assetInfo) {
-          patch.assetType = assetInfo.assetType || settings.assetType;
+        if (manualMode) setManualMode(null);
 
-          const defaultTargetWinRate =
-            assetInfo.defaultTargetWinRate !== undefined
-              ? assetInfo.defaultTargetWinRate
-              : assetInfo.defaultTargetRecovery;
+        setSettings((prev) => {
+          const next = { ...prev, symbol };
+          if (assetInfo) {
+            next.assetType = assetInfo.assetType || prev.assetType;
+            if (assetInfo.assetType === 'ETF' && assetInfo.defaultTargetWinRate !== undefined) {
+              next.targetWinRateEtf = assetInfo.defaultTargetWinRate;
+            }
+            if (assetInfo.assetType === 'STOCK' && assetInfo.defaultTargetWinRate !== undefined) {
+              next.targetWinRateStock = assetInfo.defaultTargetWinRate;
+            }
+            if (assetInfo.defaultEngineStep !== undefined) {
+              next.engineStep = assetInfo.defaultEngineStep;
+            }
+            if (assetInfo.defaultTableDisplayStep !== undefined) {
+              next.tableDisplayStep = assetInfo.defaultTableDisplayStep;
+            }
+          }
+          return next;
+        });
 
-          if (assetInfo.assetType === 'ETF' && defaultTargetWinRate !== undefined) {
-            patch.targetWinRateEtf = defaultTargetWinRate;
-          }
-          if (assetInfo.assetType === 'STOCK' && defaultTargetWinRate !== undefined) {
-            patch.targetWinRateStock = defaultTargetWinRate;
-          }
-          if (assetInfo.defaultBandStep !== undefined) {
-            patch.bandStep = assetInfo.defaultBandStep;
-          }
-        }
-
-        patchSettings(patch);
         setDataSource('LOADING');
         setReloadToken((prev) => prev + 1);
       }
 
       function handleReloadServerData() {
+        setManualMode(null);
         setRawData([]);
         setDataSource('LOADING');
         setReloadToken((prev) => prev + 1);
@@ -890,9 +948,18 @@
 
       function handleResetSampleData() {
         if (window.confirm('기본 SPY 샘플 데이터로 되돌리시겠습니까?')) {
-          patchSettings({ symbol: 'SPY', assetType: 'ETF' });
+          setManualMode('SAMPLE');
+          setSettings((prev) => ({
+            ...prev,
+            symbol: 'SPY',
+            assetType: 'ETF',
+            targetWinRateEtf: 0.80,
+            engineStep: 0.01,
+            tableDisplayStep: 0.05
+          }));
           setRawData(fallbackSampleData);
           setDataSource('SAMPLE');
+          setFetchStatus((prev) => ({ ...prev, error: null }));
         }
       }
 
@@ -908,9 +975,9 @@
 
       function handleTemplateDownload() {
         const template = [
-          { "date": "2024-01-01", "closeUsd": 470.00, "closeKrw": null },
-          { "date": "2024-01-02", "closeUsd": 475.12, "closeKrw": null },
-          { "date": "2024-01-03", "closeUsd": 472.85, "closeKrw": 631120.44 }
+          { "date": "2024-01-01", "closeUsd": 470.00, "closeKrw": 620000.00 },
+          { "date": "2024-01-02", "closeUsd": 475.12, "closeKrw": 634512.33 },
+          { "date": "2024-01-03", "closeUsd": 472.85, "closeKrw": null }
         ];
         const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(template, null, 2));
         const anchor = document.createElement('a');
@@ -924,8 +991,8 @@
       function handleImport(e) {
         const file = e.target.files[0];
         if (!file) return;
-        const reader = new FileReader();
 
+        const reader = new FileReader();
         reader.onload = (event) => {
           try {
             const parsed = JSON.parse(event.target.result);
@@ -938,31 +1005,28 @@
               }
 
               const usd = Number(row.closeUsd);
+              const rawKrw = row.closeKrw;
+              const krw = (rawKrw === null || rawKrw === undefined || rawKrw === '') ? null : Number(rawKrw);
+
               if (!Number.isFinite(usd) || usd <= 0) {
-                throw new Error(`${i + 1}번째 행: closeUsd 값이 유효한 양수가 아닙니다.`);
+                throw new Error(`${i + 1}번째 행: closeUsd 값이 유효한 양수 숫자가 아닙니다.`);
               }
 
-              const hasKrw =
-                row.closeKrw !== null &&
-                row.closeKrw !== undefined &&
-                row.closeKrw !== '';
-
-              const krw = hasKrw ? Number(row.closeKrw) : null;
-
-              if (hasKrw && (!Number.isFinite(krw) || krw <= 0)) {
-                throw new Error(`${i + 1}번째 행: closeKrw 값이 유효한 양수가 아닙니다.`);
+              if (krw !== null && (!Number.isFinite(krw) || krw <= 0)) {
+                throw new Error(`${i + 1}번째 행: closeKrw 값은 null 또는 유효한 양수 숫자여야 합니다.`);
               }
 
               return {
-                ...row,
                 date: row.date,
                 closeUsd: usd,
                 closeKrw: krw
               };
             }).sort((a, b) => a.date.localeCompare(b.date));
 
+            setManualMode('IMPORTED');
             setRawData(normalized);
             setDataSource('IMPORTED');
+            setFetchStatus((prev) => ({ ...prev, error: null }));
             alert(`총 ${normalized.length}행의 사용자 데이터를 성공적으로 불러왔습니다.`);
           } catch (err) {
             alert(`데이터 형식 오류:\n${err.message}`);
@@ -974,7 +1038,7 @@
       }
 
       function applyPreset(preset) {
-        patchSettings(preset);
+        setSettings((prev) => ({ ...prev, ...preset }));
       }
 
       function buildInterpretation() {
@@ -985,27 +1049,30 @@
 
         if (!primary) return ['엔진 설정 문제로 분석을 수행하지 못했습니다. 설정 탭을 확인해주세요.'];
 
-        const targetWinRateText = formatPct(primary.target.winRateTarget);
+        const targetWinRateText = formatPct(primary.target.targetWinRate);
         const targetDdText = primary.target.dd !== null ? formatPct(primary.target.dd) : '-';
         const usdCount = appState.usdEngine ? appState.usdEngine.timeSeries.length : 0;
         const krwCount = appState.krwEngine ? appState.krwEngine.timeSeries.length : 0;
 
         lines.push(`현재 분석 데이터 수는 USD ${usdCount}일, KRW ${krwCount}일입니다.`);
-        lines.push(`승률 엔진 기준 목표 승률 ${targetWinRateText}를 만족하는 기준 낙폭은 ${targetDdText}입니다.`);
+        lines.push(`목표 승률 ${targetWinRateText}를 만족하는 기준 낙폭은 ${targetDdText}입니다.`);
 
         if (primary.target.signalCount > 0) {
           lines.push(`해당 기준의 과거 신호 수는 ${primary.target.signalCount}회이며, 실제 승률은 ${formatPct(primary.target.winRate)}입니다.`);
         }
+
         if (primary.target.medianRecoveryDays !== null) {
           lines.push(`그 기준에서 본전 회복까지의 중앙 회복일은 ${formatDays(primary.target.medianRecoveryDays)}입니다.`);
         }
+
         if (primary.target.gapToTarget !== null) {
           if (primary.target.gapToTarget > 0) {
-            lines.push(`현재 하락폭(${formatPct(primary.metrics.currentDd)})이 목표 기준보다 얕아 아직 추가 하락 ${formatPct(primary.target.gapToTarget)}이 더 필요합니다.`);
+            lines.push(`현재 하락폭(${formatPct(primary.metrics.currentDd)})은 목표 기준보다 얕아 아직 추가 하락 ${formatPct(primary.target.gapToTarget)}이 더 필요합니다.`);
           } else {
-            lines.push(`현재 하락폭(${formatPct(primary.metrics.currentDd)})이 목표 기준에 도달하여 규칙상 매수 가능 구간입니다.`);
+            lines.push(`현재 하락폭(${formatPct(primary.metrics.currentDd)})이 목표 기준에 도달해 규칙상 매수 가능 구간입니다.`);
           }
         }
+
         lines.push(appState.gates.fearGate ? `공포 지수 조건은 충족되었습니다.` : `공포 지수 조건은 아직 충족되지 않았습니다.`);
         lines.push(appState.gates.lifeGate ? `생활 게이트도 통과한 상태입니다.` : `생활 게이트가 미충족 상태입니다. 보수적 접근이 필요합니다.`);
         lines.push(appState.gates.finalSignal ? `최종적으로 모든 조건이 맞아 실행 가능한 상태입니다.` : `아직 모든 조건이 맞지 않아 최종 실행 보류(WAIT) 상태입니다.`);
@@ -1013,9 +1080,6 @@
         return lines;
       }
 
-      // ------------------------------
-      // Renderers
-      // ------------------------------
       function renderDashboard() {
         const usdCount = appState.usdEngine ? appState.usdEngine.timeSeries.length : 0;
         const krwCount = appState.krwEngine ? appState.krwEngine.timeSeries.length : 0;
@@ -1037,6 +1101,7 @@
                   ))}
                 </select>
               </div>
+
               <div className="flex flex-wrap gap-2 md:gap-4 text-sm w-full md:w-auto justify-end">
                 <div className="bg-toss-gray/50 px-3 py-2 rounded-xl flex-1 md:flex-none text-center">
                   <p className="text-[10px] text-toss-subtext font-bold mb-0.5">데이터 소스</p>
@@ -1098,6 +1163,7 @@
                   {appState.gates.finalSignal ? 'TRIGGERED (조건 충족)' : 'WAIT (대기 중)'}
                 </Badge>
               </div>
+
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="p-5 rounded-xl bg-white/50 border border-gray-100 flex flex-col justify-between">
                   <h4 className="font-bold text-toss-text mb-4 flex items-center">
@@ -1115,6 +1181,7 @@
                     </div>
                   </div>
                 </div>
+
                 <div className="p-5 rounded-xl bg-white/50 border border-gray-100 flex flex-col justify-between">
                   <h4 className="font-bold text-toss-text mb-4 flex items-center">
                     <span className={`w-2.5 h-2.5 rounded-full mr-2 ${appState.gates.marketGate ? 'bg-green-500' : 'bg-red-500'}`}></span>
@@ -1149,6 +1216,7 @@
               {['USD', 'KRW'].map((mode) => {
                 const engine = mode === 'USD' ? appState.usdEngine : appState.krwEngine;
                 if (!engine) return null;
+
                 return (
                   <Card key={mode} title={`${mode} 엔진 (Engine)`} className={settings.primarySignalMode === mode ? 'ring-2 ring-toss-blue/30' : ''}>
                     <div className="grid grid-cols-2 gap-y-6 gap-x-4">
@@ -1157,32 +1225,39 @@
                       <Metric label="현재 하락률" value={formatPct(engine.metrics.currentDd)} highlight={true} />
                       <Metric label="최대 하락률(MDD)" value={formatPct(engine.metrics.mdd)} />
                     </div>
+
                     <DrawdownSvgChart data={engine.timeSeries} targetDd={engine.target.dd} mode={mode} />
+
                     <div className="mt-6 pt-5 border-t border-toss-gray space-y-3">
                       <div className="flex justify-between items-center">
-                        <span className="text-sm font-bold text-toss-subtext">목표 낙폭 (목표 승률 {formatPct(engine.target.winRateTarget)})</span>
+                        <span className="text-sm font-bold text-toss-subtext">목표 낙폭 (목표 승률 {formatPct(engine.target.targetWinRate)})</span>
                         <span className="text-base font-bold text-toss-text">{engine.target.dd !== null ? formatPct(engine.target.dd) : '-'}</span>
                       </div>
+
                       <div className="flex justify-between items-center bg-gray-50 p-3 rounded-lg">
                         <span className="text-sm font-bold text-toss-subtext">해당 기준 실제 승률</span>
                         <span className="text-base font-bold text-toss-text">{formatPct(engine.target.winRate)}</span>
                       </div>
+
                       <div className="flex justify-between items-center bg-gray-50 p-3 rounded-lg">
                         <span className="text-sm font-bold text-toss-subtext">중앙 회복일</span>
                         <span className="text-base font-bold text-toss-text">{formatDays(engine.target.medianRecoveryDays)}</span>
                       </div>
+
                       <div className="flex justify-between items-center bg-gray-50 p-3 rounded-lg">
                         <span className="text-sm font-bold text-toss-subtext">목표까지 가격 간격 (Gap to Target)</span>
                         <span className={`text-base font-bold ${
-                          engine.target.gapToTarget !== null && engine.target.gapToTarget > 0
-                            ? 'text-red-500'
-                            : 'text-toss-blue'
+                          engine.target.gapToTarget === null
+                            ? 'text-toss-text'
+                            : engine.target.gapToTarget > 0
+                              ? 'text-red-500'
+                              : 'text-toss-blue'
                         }`}>
                           {engine.target.gapToTarget === null
                             ? '-'
                             : engine.target.gapToTarget > 0
                               ? `${formatPct(engine.target.gapToTarget)} 추가 하락 필요`
-                              : `도달 완료`}
+                              : '도달 완료'}
                         </span>
                       </div>
                     </div>
@@ -1213,6 +1288,10 @@
 
               return (
                 <Card key={mode} title={`${mode} 물타기 승률 테이블`}>
+                  <div className="text-xs text-toss-subtext mb-4">
+                    계산 해상도는 {formatPct(settings.engineStep)} 단위, 테이블 표시는 {formatPct(settings.tableDisplayStep)} 간격 기준으로 요약됩니다.
+                  </div>
+
                   <div className="overflow-x-auto -mx-5 md:mx-0">
                     <table className="w-full text-sm text-left whitespace-nowrap">
                       <thead className="bg-toss-gray text-toss-subtext border-b border-gray-200">
@@ -1226,20 +1305,21 @@
                         </tr>
                       </thead>
                       <tbody>
-                        {engine.winRateTable.map((r, i) => {
-                          const step = Number(settings.bandStep);
-                          const currentDd = engine.metrics.currentDd;
+                        {engine.winRateTableDisplay.map((r, i) => {
+                          const isCurrentBand = sameThreshold(r.threshold, engine.currentBandThreshold);
+                          const isTarget = sameThreshold(r.threshold, engine.target.dd);
 
-                          const currentInt = thresholdToInt(currentDd);
-                          const rowInt = thresholdToInt(r.threshold);
-                          const lowerInt = thresholdToInt(r.threshold - step);
-                          const targetInt = engine.target.dd !== null ? thresholdToInt(engine.target.dd) : null;
+                          const rowClass = isTarget
+                            ? 'bg-toss-light/60'
+                            : isCurrentBand
+                              ? 'bg-yellow-50'
+                              : '';
 
-                          const isCurrentBand = currentInt <= rowInt && currentInt > lowerInt;
-                          const isTarget = targetInt !== null && rowInt === targetInt;
-
-                          const rowClass = isTarget ? 'bg-toss-light/60' : isCurrentBand ? 'bg-yellow-50' : '';
-                          const textClass = isTarget ? 'font-bold text-toss-blue' : isCurrentBand ? 'font-bold text-amber-700' : 'text-toss-text';
+                          const textClass = isTarget
+                            ? 'font-bold text-toss-blue'
+                            : isCurrentBand
+                              ? 'font-bold text-amber-700'
+                              : 'text-toss-text';
 
                           return (
                             <tr key={i} className={`border-b border-gray-100 hover:bg-gray-50 transition-colors ${rowClass}`}>
@@ -1255,8 +1335,10 @@
                       </tbody>
                     </table>
                   </div>
-                  <div className="mt-4 text-xs text-toss-subtext">
-                    노란색은 현재 낙폭이 속한 구간, 파란색은 목표 승률을 만족하는 기준 낙폭입니다.
+
+                  <div className="mt-4 flex flex-wrap gap-2 text-xs">
+                    <Badge active={true} color="blue">파란색 = 목표 승률 충족 구간</Badge>
+                    <Badge active={true} color="amber">노란색 = 현재 낙폭 구간</Badge>
                   </div>
                 </Card>
               );
@@ -1272,10 +1354,10 @@
               <p className="text-sm text-toss-subtext mb-4">초보자를 위한 추천 설정값을 한 번에 적용할 수 있습니다.</p>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                 {[
-                  { label: 'ETF 기본', preset: { assetType: 'ETF', targetWinRateEtf: 0.80, bandStep: 0.05 } },
-                  { label: '개별주 기본', preset: { assetType: 'STOCK', targetWinRateStock: 0.90, bandStep: 0.05 } },
-                  { label: '보수형', preset: { targetWinRateEtf: 0.95, targetWinRateStock: 0.95, fearGreedIndex: 'Extreme Fear', cashReady: true } },
-                  { label: '공격형', preset: { targetWinRateEtf: 0.70, targetWinRateStock: 0.75, fearGreedIndex: 'Fear', bandStep: 0.03 } }
+                  { label: 'ETF 기본', preset: { assetType: 'ETF', targetWinRateEtf: 0.80, engineStep: 0.01, tableDisplayStep: 0.05 } },
+                  { label: '개별주 기본', preset: { assetType: 'STOCK', targetWinRateStock: 0.90, engineStep: 0.01, tableDisplayStep: 0.05 } },
+                  { label: '보수형', preset: { targetWinRateEtf: 0.95, targetWinRateStock: 0.95, fearGreedIndex: 'Extreme Fear', engineStep: 0.01, tableDisplayStep: 0.05 } },
+                  { label: '공격형', preset: { targetWinRateEtf: 0.70, targetWinRateStock: 0.75, fearGreedIndex: 'Fear', engineStep: 0.01, tableDisplayStep: 0.03 } }
                 ].map(({ label, preset }) => (
                   <button
                     key={label}
@@ -1299,6 +1381,7 @@
                       ))}
                     </select>
                   </div>
+
                   <div>
                     <label className="block text-xs font-bold text-toss-subtext mb-1.5">Asset Type (기준 승률용)</label>
                     <select name="assetType" value={settings.assetType} onChange={handleSettingChange} className="w-full p-3 bg-toss-gray border-none rounded-xl text-sm font-medium focus:ring-2 focus:ring-toss-blue outline-none cursor-pointer">
@@ -1306,6 +1389,7 @@
                       <option value="STOCK">STOCK</option>
                     </select>
                   </div>
+
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <label className="block text-xs font-bold text-toss-subtext mb-1.5">ETF 목표 승률</label>
@@ -1316,6 +1400,7 @@
                       <input type="number" step="0.01" min="0.01" max="1" name="targetWinRateStock" value={settings.targetWinRateStock} onChange={handleSettingChange} className="w-full p-3 bg-toss-gray border-none rounded-xl text-sm font-medium outline-none" />
                     </div>
                   </div>
+
                   <div>
                     <label className="block text-xs font-bold text-toss-subtext mb-1.5">Currency Mode</label>
                     <select name="currencyMode" value={settings.currencyMode} onChange={handleSettingChange} className="w-full p-3 bg-toss-gray border-none rounded-xl text-sm font-medium focus:ring-2 focus:ring-toss-blue outline-none cursor-pointer">
@@ -1324,6 +1409,7 @@
                       <option value="KRW">KRW Only</option>
                     </select>
                   </div>
+
                   <div>
                     <label className="block text-xs font-bold text-toss-subtext mb-1.5">Primary Signal Mode</label>
                     <select name="primarySignalMode" value={settings.primarySignalMode} onChange={handleSettingChange} className="w-full p-3 bg-toss-gray border-none rounded-xl text-sm font-medium focus:ring-2 focus:ring-toss-blue outline-none cursor-pointer">
@@ -1344,14 +1430,23 @@
                       <input type="date" name="endDate" value={settings.endDate} onChange={handleSettingChange} className="w-full p-3 bg-toss-gray border-none rounded-xl text-sm font-medium outline-none" />
                     </div>
                   </div>
-                  <div>
-                    <label className="block text-xs font-bold text-toss-subtext mb-1.5">Band Step (낙폭 구간 단위)</label>
-                    <input type="number" step="0.01" min="0.01" max="0.20" name="bandStep" value={settings.bandStep} onChange={handleSettingChange} className="w-full p-3 bg-toss-gray border-none rounded-xl text-sm font-medium outline-none" />
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-bold text-toss-subtext mb-1.5">승률 엔진 단위</label>
+                      <input type="number" step="0.01" min="0.01" max="0.10" name="engineStep" value={settings.engineStep} onChange={handleSettingChange} className="w-full p-3 bg-toss-gray border-none rounded-xl text-sm font-medium outline-none" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-toss-subtext mb-1.5">테이블 표시 간격</label>
+                      <input type="number" step="0.01" min="0.01" max="0.20" name="tableDisplayStep" value={settings.tableDisplayStep} onChange={handleSettingChange} className="w-full p-3 bg-toss-gray border-none rounded-xl text-sm font-medium outline-none" />
+                    </div>
                   </div>
+
                   <h4 className="font-bold text-toss-text flex items-center pt-4">
                     <span className="w-1.5 h-4 bg-toss-blue rounded-full mr-2"></span>
                     투자 게이트 (수동 조작)
                   </h4>
+
                   <div>
                     <label className="block text-xs font-bold text-toss-subtext mb-1.5">현재 공포 탐욕 지수</label>
                     <select name="fearGreedIndex" value={settings.fearGreedIndex} onChange={handleSettingChange} className="w-full p-3 bg-toss-gray border-none rounded-xl text-sm font-medium focus:ring-2 focus:ring-toss-blue outline-none cursor-pointer">
@@ -1360,6 +1455,7 @@
                       <option value="Neutral">Neutral (중립 이상)</option>
                     </select>
                   </div>
+
                   <div className="bg-toss-gray/50 p-4 rounded-xl space-y-4 border border-gray-100">
                     <label className="flex items-center space-x-3 cursor-pointer">
                       <input type="checkbox" name="cashReady" checked={settings.cashReady} onChange={handleSettingChange} className="w-5 h-5 text-toss-blue border-gray-300 rounded focus:ring-toss-blue" />
@@ -1378,6 +1474,7 @@
               <p className="text-sm text-toss-subtext mb-5">
                 GitHub Pages에서는 정적 JSON 파일을 읽어옵니다. 필요하면 수동 JSON 업로드로 현재 데이터를 덮어쓸 수 있습니다.
               </p>
+
               <div className="flex flex-col sm:flex-row gap-3 flex-wrap">
                 <button onClick={handleReloadServerData} className="px-5 py-2.5 bg-gray-200 text-toss-text rounded-xl font-bold text-sm hover:bg-gray-300 transition-colors shadow-sm">서버 데이터 다시 불러오기</button>
                 <button onClick={handleResetSampleData} className="px-5 py-2.5 bg-gray-200 text-toss-text rounded-xl font-bold text-sm hover:bg-gray-300 transition-colors shadow-sm">SPY 샘플 데이터 리셋</button>
@@ -1400,21 +1497,27 @@
         let usdPositive = true;
 
         for (let i = 0; i < rawData.length - 1; i++) {
-          if (rawData[i].date > rawData[i + 1].date) { isAscending = false; break; }
+          if (rawData[i].date > rawData[i + 1].date) {
+            isAscending = false;
+            break;
+          }
         }
 
         for (let i = 0; i < rawData.length; i++) {
-          if (!isValidPositiveNumber(rawData[i].closeUsd)) { usdPositive = false; break; }
+          if (!isValidPositiveNumber(rawData[i].closeUsd)) {
+            usdPositive = false;
+            break;
+          }
         }
 
         const krwNullCount = rawData.filter((r) => r.closeKrw === null || r.closeKrw === undefined).length;
         const krwValidCount = rawData.filter((r) => isValidPositiveNumber(r.closeKrw)).length;
         const krwAnomalyCount = rawData.length - krwNullCount - krwValidCount;
 
-        const validBandStep = Number.isFinite(Number(settings.bandStep)) && Number(settings.bandStep) > 0;
-        const hasWinRateTable = primary && primary.winRateTable && primary.winRateTable.length > 0;
+        const validEngineStep = Number.isFinite(Number(settings.engineStep)) && Number(settings.engineStep) > 0;
+        const validTableDisplayStep = Number.isFinite(Number(settings.tableDisplayStep)) && Number(settings.tableDisplayStep) > 0;
+        const hasWinRateTable = primary && primary.winRateTableFull && primary.winRateTableFull.length > 0;
         const targetExists = primary && primary.target && primary.target.dd !== null;
-
         const krwStartCorrectlyAdjusted =
           meta.krwAnalysisStart !== null &&
           meta.krwFirstDate !== null &&
@@ -1426,7 +1529,8 @@
           { id: 'F3', name: 'USDKRW 환율 로드', expected: 'TRUE', actual: fetchStatus.fx === true ? 'TRUE' : (dataSource === 'SAMPLE' || dataSource === 'IMPORTED' ? 'SKIP' : 'FALSE'), pass: dataSource === 'SAMPLE' || dataSource === 'IMPORTED' ? null : fetchStatus.fx === true },
           { id: 'D1', name: '날짜 오름차순 정렬', expected: 'TRUE', actual: isAscending ? 'TRUE' : 'FALSE', pass: isAscending },
           { id: 'D2', name: 'USD 가격 양수 여부', expected: 'TRUE', actual: usdPositive ? 'TRUE' : 'FALSE', pass: usdPositive },
-          { id: 'D3', name: '유효한 Band Step', expected: 'TRUE', actual: validBandStep ? 'TRUE' : 'FALSE', pass: validBandStep },
+          { id: 'D3', name: '유효한 승률 엔진 단위', expected: 'TRUE', actual: validEngineStep ? 'TRUE' : 'FALSE', pass: validEngineStep },
+          { id: 'D4', name: '유효한 테이블 표시 간격', expected: 'TRUE', actual: validTableDisplayStep ? 'TRUE' : 'FALSE', pass: validTableDisplayStep },
           { id: 'K1', name: 'KRW 유효 행 수 > 0', expected: '> 0', actual: String(krwValidCount), pass: krwValidCount > 0 },
           { id: 'K2', name: 'KRW 이상값 행 수 (0이어야 정상)', expected: '0', actual: String(krwAnomalyCount), pass: krwAnomalyCount === 0 },
           { id: 'K3', name: 'KRW 시작일 보정 정상', expected: 'TRUE', actual: krwStartCorrectlyAdjusted ? 'TRUE' : (meta.krwFirstDate === null ? 'SKIP' : 'FALSE'), pass: meta.krwFirstDate === null ? null : krwStartCorrectlyAdjusted },
@@ -1440,7 +1544,7 @@
         return (
           <div className="space-y-6 animate-fade-in pb-10">
             <Card title="시스템 검증 (System Verification)">
-              <p className="text-sm text-toss-subtext mb-5">정적 JSON 로딩, 데이터 무결성, KRW 품질, 엔진 연산, 물타기 승률 테이블 생성을 점검합니다.</p>
+              <p className="text-sm text-toss-subtext mb-5">정적 JSON 로딩, 데이터 무결성, KRW 품질, 엔진 연산, 승률 테이블 생성을 점검합니다.</p>
               <div className="overflow-x-auto -mx-5 md:mx-0">
                 <table className="w-full text-sm text-left">
                   <thead className="bg-toss-gray text-toss-subtext border-b border-gray-200">
@@ -1499,13 +1603,14 @@
                 <li className="flex items-start"><span className="text-toss-blue mr-2">•</span> 그래서 단순 체류비율이 아니라 실제 물타기 승률과 회복일을 보여줍니다.</li>
               </ul>
             </Card>
+
             <Card title="2. 핵심 개념">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {[
-                  { title: '승률', desc: '특정 낙폭에서 추가매수했을 때, 이후 종가가 진입가 이상으로 회복한 비율입니다.' },
-                  { title: '신호 수', desc: '그 낙폭 구간을 처음 하향 돌파한 횟수입니다. 연속 하락 구간은 1회 신호로 봅니다.' },
+                  { title: '목표 승률', desc: '내가 원하는 최소 승률입니다. 이 값을 만족하는 가장 얕은 낙폭을 목표 낙폭으로 채택합니다.' },
+                  { title: '실제 승률', desc: '해당 낙폭 기준을 과거에 처음 하향 돌파했을 때, 이후 본전 회복에 성공한 비율입니다.' },
                   { title: '중앙 회복일', desc: '본전 회복까지 걸린 일수의 중앙값입니다. 평균보다 왜곡이 적습니다.' },
-                  { title: '목표 승률', desc: '내가 원하는 최소 승률입니다. 이 값을 만족하는 가장 얕은 낙폭을 기준선으로 사용합니다.' }
+                  { title: '목표까지 가격 간격', desc: '현재 가격이 목표 낙폭 가격보다 얼마나 더 내려와야 하는지 보여줍니다.' }
                 ].map(({ title, desc }) => (
                   <div key={title} className="bg-gray-50 p-4 rounded-xl">
                     <p className="font-bold text-toss-blue mb-1">{title}</p>
@@ -1514,28 +1619,21 @@
                 ))}
               </div>
             </Card>
-            <Card title="3. 이 앱이 하지 않는 일">
+
+            <Card title="3. 설정값 해석">
+              <div className="space-y-3 text-sm text-toss-text">
+                <p><b>승률 엔진 단위</b> : 실제 승률 계산 해상도입니다. 0.01이면 1% 단위로 계산합니다.</p>
+                <p><b>테이블 표시 간격</b> : 승률 테이블을 화면에 보여줄 때의 요약 간격입니다. 계산 자체와는 별개입니다.</p>
+                <p><b>Primary Signal Mode</b> : 최종 판단을 USD 기준으로 할지, KRW 기준으로 할지 정하는 기준 엔진입니다.</p>
+              </div>
+            </Card>
+
+            <Card title="4. 이 앱이 하지 않는 일">
               <ul className="space-y-2 text-sm text-red-600 font-medium">
                 <li className="flex items-start"><span className="mr-2">•</span> 미래 가격을 예측하지 않습니다.</li>
                 <li className="flex items-start"><span className="mr-2">•</span> 자동 매매를 실행하지 않습니다.</li>
                 <li className="flex items-start"><span className="mr-2">•</span> 배당재투자(PV 기준) MDD는 아직 적용하지 않았습니다. 현재는 종가 기준입니다.</li>
               </ul>
-            </Card>
-            <Card title="4. 사용 흐름">
-              <ol className="space-y-4 text-sm text-toss-text">
-                {[
-                  '자산과 기간을 선택합니다.',
-                  '목표 승률을 입력합니다. 예: ETF 0.80 = 80%',
-                  '대시보드에서 목표 낙폭과 현재 낙폭 차이를 봅니다.',
-                  '승률 테이블에서 신호 수가 충분한지, 중앙 회복일이 감당 가능한지 봅니다.',
-                  '마지막으로 생활 게이트와 시장 게이트를 함께 판단합니다.'
-                ].map((step, i) => (
-                  <li key={i} className="flex items-center">
-                    <span className="bg-toss-blue text-white w-6 h-6 rounded-full flex items-center justify-center mr-3 font-bold shrink-0">{i + 1}</span>
-                    {step}
-                  </li>
-                ))}
-              </ol>
             </Card>
           </div>
         );
@@ -1547,6 +1645,7 @@
             <header className="mb-6 pl-2">
               <h1 className="text-2xl md:text-3xl font-extrabold text-toss-text tracking-tight">MDD Target Tracker</h1>
             </header>
+
             <nav className="flex space-x-2 mb-6 overflow-x-auto no-scrollbar pb-2 px-2">
               {[
                 { id: 'dashboard', label: '대시보드' },
@@ -1566,6 +1665,7 @@
                 </button>
               ))}
             </nav>
+
             <main className="px-2">
               {activeTab === 'dashboard' && renderDashboard()}
               {activeTab === 'detail' && renderDetail()}
@@ -1587,3 +1687,5 @@
   </script>
 </body>
 </html>
+
+
