@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>MDD Target Tracker (MDD Ratio Win Engine)</title>
+  <title>MDD Target Tracker</title>
 
   <script>
     window.__APP_MOUNTED__ = false;
@@ -62,7 +62,7 @@
           }
         }
       }
-    }
+    };
   </script>
 
   <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
@@ -99,6 +99,9 @@
   <script type="text/babel" data-presets="react,env">
     const { useState, useMemo, useEffect, useRef } = React;
 
+    // -------------------------------------
+    // Error Boundary
+    // -------------------------------------
     class ErrorBoundary extends React.Component {
       constructor(props) {
         super(props);
@@ -131,15 +134,16 @@
       }
     }
 
-    const SCALE = 10000;
-
+    // -------------------------------------
+    // Constants
+    // -------------------------------------
     const DEFAULT_SETTINGS = {
       symbol: 'SPY',
       startDate: '2010-01-01',
       endDate: '2026-12-31',
       targetMddRatioEtf: 0.80,
       targetMddRatioStock: 0.90,
-      mddRatioStep: 0.05,
+      bandStep: 0.05,
       assetType: 'ETF',
       currencyMode: 'BOTH',
       primarySignalMode: 'USD',
@@ -149,13 +153,16 @@
     };
 
     const FALLBACK_ASSETS = [
-      { symbol: 'SPY', name: 'SPDR S&P 500 ETF Trust', assetType: 'ETF', enabled: true, defaultTargetMddRatio: 0.80, defaultMddRatioStep: 0.05 },
-      { symbol: 'QQQ', name: 'Invesco QQQ Trust', assetType: 'ETF', enabled: true, defaultTargetMddRatio: 0.80, defaultMddRatioStep: 0.05 },
-      { symbol: 'HYG', name: 'iShares iBoxx $ High Yield Corporate Bond ETF', assetType: 'ETF', enabled: true, defaultTargetMddRatio: 0.80, defaultMddRatioStep: 0.05 },
-      { symbol: 'GLD', name: 'SPDR Gold Shares', assetType: 'ETF', enabled: true, defaultTargetMddRatio: 0.80, defaultMddRatioStep: 0.05 },
-      { symbol: 'TLT', name: 'iShares 20+ Year Treasury Bond ETF', assetType: 'ETF', enabled: true, defaultTargetMddRatio: 0.80, defaultMddRatioStep: 0.05 }
+      { symbol: 'SPY', name: 'SPDR S&P 500 ETF Trust', assetType: 'ETF', enabled: true, defaultTargetMddRatio: 0.80, defaultBandStep: 0.05 },
+      { symbol: 'QQQ', name: 'Invesco QQQ Trust', assetType: 'ETF', enabled: true, defaultTargetMddRatio: 0.80, defaultBandStep: 0.05 },
+      { symbol: 'HYG', name: 'iShares iBoxx $ High Yield Corporate Bond ETF', assetType: 'ETF', enabled: true, defaultTargetMddRatio: 0.80, defaultBandStep: 0.05 },
+      { symbol: 'GLD', name: 'SPDR Gold Shares', assetType: 'ETF', enabled: true, defaultTargetMddRatio: 0.80, defaultBandStep: 0.05 },
+      { symbol: 'TLT', name: 'iShares 20+ Year Treasury Bond ETF', assetType: 'ETF', enabled: true, defaultTargetMddRatio: 0.80, defaultBandStep: 0.05 }
     ];
 
+    // -------------------------------------
+    // Sample Data
+    // -------------------------------------
     function generateSampleData(symbol) {
       const arr = [];
       let seed = 0;
@@ -188,6 +195,9 @@
       return arr;
     }
 
+    // -------------------------------------
+    // Storage
+    // -------------------------------------
     function getSafeLocalStorage() {
       try { return window.localStorage; } catch (e) { return null; }
     }
@@ -224,6 +234,9 @@
       return [storedValue, setValue];
     }
 
+    // -------------------------------------
+    // Utils
+    // -------------------------------------
     function isValidPositiveNumber(value) {
       return (
         value !== null &&
@@ -232,6 +245,10 @@
         Number.isFinite(Number(value)) &&
         Number(value) > 0
       );
+    }
+
+    function clamp(value, min, max) {
+      return Math.min(max, Math.max(min, value));
     }
 
     function formatPct(val) {
@@ -260,25 +277,12 @@
       return valid.sort((a, b) => a.localeCompare(b))[valid.length - 1];
     }
 
-    function toScaled(value) {
-      return Math.round(Number(value) * SCALE);
-    }
-
-    function fromScaled(valueInt) {
-      return Number((valueInt / SCALE).toFixed(4));
-    }
-
-    function sameScaled(a, b) {
-      if (a === null || a === undefined || b === null || b === undefined) return false;
-      return toScaled(a) === toScaled(b);
-    }
-
-    function filterRawDataByDateRange(data, start, end, priceKey) {
-      return data.filter((d) => {
-        const inRange = d.date >= start && d.date <= end;
-        const hasValue = isValidPositiveNumber(d[priceKey]);
-        return inRange && hasValue;
-      });
+    function median(values) {
+      if (!values || values.length === 0) return null;
+      const sorted = [...values].sort((a, b) => a - b);
+      const mid = Math.floor(sorted.length / 2);
+      if (sorted.length % 2 === 0) return (sorted[mid - 1] + sorted[mid]) / 2;
+      return sorted[mid];
     }
 
     function normalizePriceRows(rows) {
@@ -360,104 +364,18 @@
       };
     }
 
-    function median(values) {
-      if (!values || values.length === 0) return null;
-      const sorted = [...values].sort((a, b) => a - b);
-      const mid = Math.floor(sorted.length / 2);
-      if (sorted.length % 2 === 0) return (sorted[mid - 1] + sorted[mid]) / 2;
-      return sorted[mid];
-    }
-
-    function buildRatioValues(step, selectedRatio) {
-      const safeStepInt = Math.max(1, toScaled(step));
-      const minInt = safeStepInt;
-      const maxInt = toScaled(1);
-      const selectedInt = Math.min(maxInt, Math.max(minInt, toScaled(selectedRatio)));
-
-      const values = new Set();
-
-      for (let i = minInt; i <= maxInt; i += safeStepInt) {
-        values.add(i);
-      }
-      values.add(selectedInt);
-      values.add(maxInt);
-
-      return Array.from(values)
-        .sort((a, b) => a - b)
-        .map((v) => fromScaled(v));
-    }
-
-    function buildMddRatioTable(timeSeries, ratioStep, selectedRatio) {
-      if (!timeSeries || timeSeries.length === 0) return [];
-
-      const ddValues = timeSeries.map((x) => x.dd);
-      const mdd = Math.min.apply(null, ddValues);
-
-      if (!Number.isFinite(mdd) || mdd >= 0) return [];
-
-      const ratios = buildRatioValues(ratioStep, selectedRatio);
-
-      return ratios.map((ratio) => {
-        const threshold = mdd * ratio;
-        const signalIndexes = [];
-
-        for (let i = 0; i < timeSeries.length; i++) {
-          const currDd = timeSeries[i].dd;
-          const prevDd = i > 0 ? timeSeries[i - 1].dd : null;
-          const crossedDown = currDd <= threshold && (i === 0 || prevDd > threshold);
-          if (crossedDown) signalIndexes.push(i);
-        }
-
-        let winCount = 0;
-        let loseCount = 0;
-        const recoveryDaysList = [];
-
-        signalIndexes.forEach((entryIndex) => {
-          const entryPrice = timeSeries[entryIndex].price;
-          let recoveredIndex = null;
-
-          for (let j = entryIndex + 1; j < timeSeries.length; j++) {
-            if (timeSeries[j].price >= entryPrice) {
-              recoveredIndex = j;
-              break;
-            }
-          }
-
-          if (recoveredIndex !== null) {
-            winCount += 1;
-            recoveryDaysList.push(recoveredIndex - entryIndex);
-          } else {
-            loseCount += 1;
-          }
-        });
-
-        const signalCount = signalIndexes.length;
-        const winRate = signalCount > 0 ? winCount / signalCount : null;
-        const avgRecoveryDays = recoveryDaysList.length > 0
-          ? recoveryDaysList.reduce((sum, v) => sum + v, 0) / recoveryDaysList.length
-          : null;
-        const medianRecoveryDays = median(recoveryDaysList);
-
-        return {
-          ratio,
-          ratioInt: toScaled(ratio),
-          threshold,
-          thresholdInt: toScaled(threshold),
-          signalCount,
-          winCount,
-          loseCount,
-          winRate,
-          avgRecoveryDays,
-          medianRecoveryDays
-        };
+    function filterRawDataByDateRange(data, start, end, priceKey) {
+      return data.filter((d) => {
+        const inRange = d.date >= start && d.date <= end;
+        const hasValue = isValidPositiveNumber(d[priceKey]);
+        return inRange && hasValue;
       });
     }
 
-    function runEngine(rawData, priceKey, analysisStart, analysisEnd, settings) {
-      const ratioStep = Number(settings.mddRatioStep);
-      if (!Number.isFinite(ratioStep) || ratioStep <= 0) return null;
-      if (!analysisStart || !analysisEnd) return null;
-
+    // -------------------------------------
+    // MDD Ratio Engine
+    // -------------------------------------
+    function buildTimeSeries(rawData, priceKey, analysisStart, analysisEnd) {
       const data = filterRawDataByDateRange(rawData, analysisStart, analysisEnd, priceKey);
       if (!data || data.length === 0) return null;
 
@@ -473,7 +391,6 @@
         const price = Number(d[priceKey]);
 
         if (!isValidPositiveNumber(price)) continue;
-
         if (price > ath) ath = price;
         if (!(ath > 0)) continue;
 
@@ -502,53 +419,156 @@
       const currentDd = timeSeries[timeSeries.length - 1].dd;
       const avgDd = ddArray.reduce((sum, val) => sum + val, 0) / ddArray.length;
 
-      const targetMddRatio =
-        settings.assetType === 'ETF'
-          ? Number(settings.targetMddRatioEtf)
-          : Number(settings.targetMddRatioStock);
-
-      const ratioTable = buildMddRatioTable(timeSeries, ratioStep, targetMddRatio);
-      const targetRow = ratioTable.find((r) => sameScaled(r.ratio, targetMddRatio)) || null;
-
-      const targetDd = targetRow ? targetRow.threshold : null;
-      const targetPrice = targetDd !== null ? ath * (1 + targetDd) : null;
-      const additionalDropNeededPct =
-        (targetPrice !== null && currentPrice > 0 && currentPrice > targetPrice)
-          ? (currentPrice - targetPrice) / currentPrice
-          : 0;
-
-      const currentMddRatio =
-        mdd < 0 ? Math.abs(currentDd) / Math.abs(mdd) : null;
-
       return {
-        metrics: {
-          ath,
-          currentPrice,
-          currentDd,
-          mdd,
-          mddDate,
-          mddIndex,
-          avgDd,
-          currentMddRatio
-        },
-        analysisStart,
-        analysisEnd,
-        ratioTable,
-        target: {
-          mddRatio: targetMddRatio,
-          dd: targetDd,
-          price: targetPrice,
-          additionalDropNeededPct,
-          isTriggered: targetDd !== null ? currentDd <= targetDd : false,
-          signalCount: targetRow ? targetRow.signalCount : 0,
-          winRate: targetRow ? targetRow.winRate : null,
-          medianRecoveryDays: targetRow ? targetRow.medianRecoveryDays : null,
-          avgRecoveryDays: targetRow ? targetRow.avgRecoveryDays : null
-        },
+        metrics: { ath, currentPrice, currentDd, mdd, mddDate, avgDd, mddIndex },
         timeSeries
       };
     }
 
+    function computeSignalStatsForThreshold(timeSeries, threshold) {
+      if (!timeSeries || timeSeries.length === 0 || !Number.isFinite(threshold)) {
+        return {
+          signalCount: 0,
+          winCount: 0,
+          loseCount: 0,
+          winRate: null,
+          avgRecoveryDays: null,
+          medianRecoveryDays: null
+        };
+      }
+
+      const signalIndexes = [];
+
+      for (let i = 0; i < timeSeries.length; i++) {
+        const currDd = timeSeries[i].dd;
+        const prevDd = i > 0 ? timeSeries[i - 1].dd : null;
+        const crossedDown = currDd <= threshold && (i === 0 || prevDd > threshold);
+        if (crossedDown) signalIndexes.push(i);
+      }
+
+      let winCount = 0;
+      let loseCount = 0;
+      const recoveryDaysList = [];
+
+      signalIndexes.forEach((entryIndex) => {
+        const entryPrice = timeSeries[entryIndex].price;
+        let recoveredIndex = null;
+
+        for (let j = entryIndex + 1; j < timeSeries.length; j++) {
+          if (timeSeries[j].price >= entryPrice) {
+            recoveredIndex = j;
+            break;
+          }
+        }
+
+        if (recoveredIndex !== null) {
+          winCount += 1;
+          recoveryDaysList.push(recoveredIndex - entryIndex);
+        } else {
+          loseCount += 1;
+        }
+      });
+
+      const signalCount = signalIndexes.length;
+      const winRate = signalCount > 0 ? winCount / signalCount : null;
+      const avgRecoveryDays = recoveryDaysList.length > 0
+        ? recoveryDaysList.reduce((sum, v) => sum + v, 0) / recoveryDaysList.length
+        : null;
+      const medianRecoveryDays = median(recoveryDaysList);
+
+      return {
+        signalCount,
+        winCount,
+        loseCount,
+        winRate,
+        avgRecoveryDays,
+        medianRecoveryDays
+      };
+    }
+
+    function buildMddRatioTable(timeSeries, periodMdd, ratioStep) {
+      if (!timeSeries || timeSeries.length === 0) return [];
+      if (!Number.isFinite(periodMdd) || periodMdd >= 0) return [];
+
+      const SCALE = 10000;
+      const safeStep = clamp(Number(ratioStep) || 0.05, 0.01, 1);
+      const stepInt = Math.max(1, Math.round(safeStep * SCALE));
+
+      const ratioInts = [];
+      for (let r = stepInt; r < SCALE; r += stepInt) {
+        ratioInts.push(r);
+      }
+      if (ratioInts.length === 0 || ratioInts[ratioInts.length - 1] !== SCALE) {
+        ratioInts.push(SCALE);
+      }
+
+      return ratioInts.map((ratioInt) => {
+        const ratio = ratioInt / SCALE;
+        const threshold = Number((periodMdd * ratio).toFixed(4));
+        const stats = computeSignalStatsForThreshold(timeSeries, threshold);
+
+        return {
+          ratio,
+          ratioInt,
+          threshold,
+          signalCount: stats.signalCount,
+          winCount: stats.winCount,
+          loseCount: stats.loseCount,
+          winRate: stats.winRate,
+          avgRecoveryDays: stats.avgRecoveryDays,
+          medianRecoveryDays: stats.medianRecoveryDays
+        };
+      });
+    }
+
+    function runEngine(rawData, priceKey, analysisStart, analysisEnd, settings) {
+      const base = buildTimeSeries(rawData, priceKey, analysisStart, analysisEnd);
+      if (!base) return null;
+
+      const timeSeries = base.timeSeries;
+      const metrics = base.metrics;
+      const periodMdd = metrics.mdd;
+
+      const targetRatio = settings.assetType === 'ETF'
+        ? Number(settings.targetMddRatioEtf)
+        : Number(settings.targetMddRatioStock);
+
+      const safeTargetRatio = clamp(targetRatio, 0.01, 1);
+      const mddRatioTable = buildMddRatioTable(timeSeries, periodMdd, settings.bandStep);
+
+      const targetDd = Number((periodMdd * safeTargetRatio).toFixed(4));
+      const targetStats = computeSignalStatsForThreshold(timeSeries, targetDd);
+      const targetPrice = metrics.ath * (1 + targetDd);
+      const gapToTarget = metrics.currentPrice > 0 ? (targetPrice / metrics.currentPrice) - 1 : null;
+      const currentMddUsageRatio = periodMdd < 0 ? Math.abs(metrics.currentDd / periodMdd) : null;
+
+      return {
+        metrics,
+        analysisStart,
+        analysisEnd,
+        mddRatioTable,
+        target: {
+          ratio: safeTargetRatio,
+          dd: targetDd,
+          price: targetPrice,
+          gapToTarget,
+          isTriggered: metrics.currentDd <= targetDd,
+          signalCount: targetStats.signalCount,
+          winRate: targetStats.winRate,
+          medianRecoveryDays: targetStats.medianRecoveryDays,
+          avgRecoveryDays: targetStats.avgRecoveryDays,
+          winCount: targetStats.winCount,
+          loseCount: targetStats.loseCount
+        },
+        periodMdd,
+        currentMddUsageRatio,
+        timeSeries
+      };
+    }
+
+    // -------------------------------------
+    // UI Components
+    // -------------------------------------
     function Card({ title, children, className = '', titleRight = null }) {
       return (
         <div className={`bg-white rounded-2xl shadow-card p-5 md:p-6 mb-6 ${className}`}>
@@ -579,8 +599,7 @@
         blue: active ? 'bg-toss-blue text-white' : 'bg-toss-light text-toss-blue',
         gray: active ? 'bg-gray-500 text-white' : 'bg-toss-gray text-toss-subtext',
         red: active ? 'bg-red-500 text-white' : 'bg-red-50 text-red-500',
-        green: active ? 'bg-green-500 text-white' : 'bg-green-50 text-green-600',
-        amber: active ? 'bg-amber-500 text-white' : 'bg-amber-50 text-amber-700'
+        green: active ? 'bg-green-500 text-white' : 'bg-green-50 text-green-600'
       };
       return (
         <span className={`px-3 py-1.5 rounded-full text-xs font-bold whitespace-nowrap ${colors[color]}`}>
@@ -596,14 +615,14 @@
     }
 
     function DrawdownSvgChart({ data, targetDd, mode, mddDate, mddValue }) {
-      const [tooltipIndex, setTooltipIndex] = useState(null);
+      const [selectedIndex, setSelectedIndex] = useState(null);
       const wrapRef = useRef(null);
 
       const chartData = useMemo(() => {
         if (!data || data.length === 0) return [];
         const sampleEvery = Math.max(1, Math.floor(data.length / 260));
         const sampled = data.filter((_, i) => i % sampleEvery === 0);
-        if (sampled[sampled.length - 1].date !== data[data.length - 1].date) {
+        if (sampled.length > 0 && sampled[sampled.length - 1].date !== data[data.length - 1].date) {
           sampled.push(data[data.length - 1]);
         }
         return sampled;
@@ -621,16 +640,16 @@
       const svgHeight = 250;
       const padTop = 18;
       const padBottom = 18;
-      const labelWidthPct = 12;
+      const labelWidthPct = 16;
       const padLeft = 0;
       const padRight = svgWidth * (labelWidthPct / 100);
       const drawWidth = svgWidth - padLeft - padRight;
       const drawHeight = svgHeight - padTop - padBottom;
 
       const currentPoint = chartData[chartData.length - 1];
-      const mddPoint = chartData.reduce((acc, d) => d.dd < acc.dd ? d : acc, chartData[0]);
+      const actualMddPoint = chartData.reduce((acc, d) => (d.dd < acc.dd ? d : acc), chartData[0]);
 
-      const compareCandidates = [mddPoint.dd, currentPoint.dd, -0.05];
+      const compareCandidates = [actualMddPoint.dd, currentPoint.dd, -0.05];
       if (Number.isFinite(targetDd)) compareCandidates.push(targetDd);
 
       const minDdForScale = Math.min.apply(null, compareCandidates);
@@ -639,6 +658,7 @@
 
       const getX = (i) => padLeft + (chartData.length > 1 ? (i / (chartData.length - 1)) * drawWidth : 0);
       const getY = (dd) => padTop + ((-dd) / yRange) * drawHeight;
+      const toPct = (val) => `${(val / svgHeight) * 100}%`;
 
       const y0 = getY(0);
       const yTarget = Number.isFinite(targetDd) ? getY(targetDd) : null;
@@ -655,111 +675,184 @@
         if (!wrapRef.current) return null;
         const rect = wrapRef.current.getBoundingClientRect();
         const x = clientX - rect.left;
-        const clamped = Math.max(0, Math.min(rect.width, x));
-        const ratio = rect.width > 0 ? clamped / rect.width : 0;
+        const clampedX = Math.max(0, Math.min(rect.width, x));
+        const ratio = rect.width > 0 ? clampedX / rect.width : 0;
         const idx = Math.round(ratio * (chartData.length - 1));
         return Math.max(0, Math.min(chartData.length - 1, idx));
       }
 
-      function handleClick(e) {
+      function handlePointer(e) {
         const clientX = e.clientX;
         const idx = findNearestIndex(clientX);
-        setTooltipIndex(idx);
+        setSelectedIndex(idx);
       }
 
       function handleTouch(e) {
         if (!e.touches || e.touches.length === 0) return;
         const clientX = e.touches[0].clientX;
         const idx = findNearestIndex(clientX);
-        setTooltipIndex(idx);
+        setSelectedIndex(idx);
       }
 
-      const selectedPoint = tooltipIndex !== null ? chartData[tooltipIndex] : null;
-      const selectedX = selectedPoint ? getX(tooltipIndex) : null;
+      const selectedPoint = selectedIndex !== null ? chartData[selectedIndex] : null;
+      const selectedX = selectedPoint ? getX(selectedIndex) : null;
       const selectedY = selectedPoint ? getY(selectedPoint.dd) : null;
+      const isSelectedMdd =
+        !!selectedPoint &&
+        selectedPoint.date === mddDate &&
+        Math.abs(selectedPoint.dd - mddValue) < 0.000001;
 
-      const mddSelected = selectedPoint && selectedPoint.date === mddDate && Math.abs(selectedPoint.dd - mddValue) < 0.000001;
+      // 모바일에서 목표선 라벨이 하단 설명이나 상단 영역과 겹치지 않게 클램프
+      const clampedTargetY = Number.isFinite(yTarget)
+        ? clamp(yTarget, 20, svgHeight - 26)
+        : null;
 
       return (
         <div className="mt-6">
           <div
             ref={wrapRef}
             className="h-56 md:h-64 w-full relative rounded-xl overflow-hidden"
-            onClick={handleClick}
+            onClick={handlePointer}
             onTouchStart={handleTouch}
             onTouchMove={handleTouch}
           >
             <svg viewBox={`0 0 ${svgWidth} ${svgHeight}`} className="w-full h-full" preserveAspectRatio="none">
               <path d={areaPath} fill={fillColor} opacity="0.58" />
-              <line x1={0} y1={y0} x2={drawWidth} y2={y0} stroke="#e5e8eb" strokeWidth="2" strokeDasharray="4 4" vectorEffect="non-scaling-stroke" />
+
+              <line
+                x1={0}
+                y1={y0}
+                x2={drawWidth}
+                y2={y0}
+                stroke="#e5e8eb"
+                strokeWidth="2"
+                strokeDasharray="4 4"
+                vectorEffect="non-scaling-stroke"
+              />
+
               {Number.isFinite(yTarget) && (
-                <line x1={0} y1={yTarget} x2={drawWidth} y2={yTarget} stroke="#f04452" strokeWidth="2" strokeDasharray="6 5" vectorEffect="non-scaling-stroke" />
+                <line
+                  x1={0}
+                  y1={yTarget}
+                  x2={drawWidth}
+                  y2={yTarget}
+                  stroke="#f04452"
+                  strokeWidth="2"
+                  strokeDasharray="6 5"
+                  vectorEffect="non-scaling-stroke"
+                />
               )}
-              <path d={linePath} fill="none" stroke={strokeColor} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
+
+              <path
+                d={linePath}
+                fill="none"
+                stroke={strokeColor}
+                strokeWidth="2"
+                strokeLinejoin="round"
+                strokeLinecap="round"
+                vectorEffect="non-scaling-stroke"
+              />
 
               {selectedPoint && (
                 <>
-                  <circle cx={selectedX} cy={selectedY} r="4.5" fill={strokeColor} />
-                  {mddDate && (
-                    <circle
-                      cx={getX(chartData.findIndex((d) => d.date === mddPoint.date && d.dd === mddPoint.dd))}
-                      cy={getY(mddPoint.dd)}
-                      r="4.5"
-                      fill="#ef4444"
-                    />
-                  )}
+                  <line
+                    x1={selectedX}
+                    y1={padTop}
+                    x2={selectedX}
+                    y2={svgHeight - padBottom}
+                    stroke="#9ca3af"
+                    strokeWidth="1.5"
+                    strokeDasharray="3 4"
+                    vectorEffect="non-scaling-stroke"
+                  />
+                  <circle cx={selectedX} cy={selectedY} r="5" fill={strokeColor} />
                 </>
               )}
             </svg>
 
-            {selectedPoint && (
+            {Number.isFinite(clampedTargetY) && (
               <div
-                className="absolute z-10 bg-white border border-gray-200 rounded-xl shadow-lg p-3 text-xs leading-5 w-52"
-                style={{
-                  left: selectedX / svgWidth > 0.68 ? 'auto' : '12px',
-                  right: selectedX / svgWidth > 0.68 ? '12px' : 'auto',
-                  top: '12px'
-                }}
+                className="absolute right-0.5 md:right-1 px-1.5 py-0.5 text-[10px] md:text-[11px] font-bold text-red-500 bg-white/95 rounded shadow-sm pointer-events-none leading-none"
+                style={{ top: `calc(${toPct(clampedTargetY)} - 9px)` }}
               >
-                <div className="font-bold text-toss-text mb-1">차트 정보</div>
-                <div className="text-toss-subtext">터치 날짜: <span className="font-semibold text-toss-text">{selectedPoint.date}</span></div>
-                <div className="text-toss-subtext">터치 낙폭: <span className="font-semibold text-toss-text">{formatPct(selectedPoint.dd)}</span></div>
-                <div className="text-toss-subtext">터치 가격: <span className="font-semibold text-toss-text">{formatNum(selectedPoint.price)}</span></div>
-                <div className="text-toss-subtext">목표선: <span className="font-semibold text-red-500">{formatPct(targetDd)}</span></div>
-                <div className="mt-2 pt-2 border-t border-gray-100 text-toss-subtext">
-                  MDD 날짜: <span className="font-semibold text-toss-text">{mddDate || '-'}</span>
-                </div>
-                <div className="text-toss-subtext">
-                  MDD 낙폭: <span className="font-semibold text-toss-text">{formatPct(mddValue)}</span>
-                </div>
-                <div className="mt-1">
-                  {mddSelected
-                    ? <span className="font-bold text-red-500">이 지점이 MDD입니다</span>
-                    : <span className="font-medium text-toss-subtext">이 지점은 MDD가 아닙니다</span>}
-                </div>
+                목표선 {formatPct1(targetDd)}
               </div>
             )}
           </div>
 
-          <div className="mt-2 flex items-center justify-between text-xs text-toss-subtext">
-            <span>차트를 터치/클릭하면 날짜, 낙폭, MDD 정보를 확인할 수 있습니다.</span>
-            {Number.isFinite(targetDd) && <span className="font-semibold text-red-500">목표선 {formatPct(targetDd)}</span>}
+          <div className="mt-2 flex items-center justify-between gap-2 text-xs">
+            <span className="text-toss-subtext">차트를 터치/클릭하면 터치 지점과 MDD 정보를 아래에서 확인합니다.</span>
+            <span className="font-semibold text-red-500 shrink-0">
+              {Number.isFinite(targetDd) ? `목표선 ${formatPct(targetDd)}` : ''}
+            </span>
           </div>
+
+          {selectedPoint && (
+            <div className="mt-3 bg-white border border-gray-200 rounded-2xl p-4 shadow-sm text-sm">
+              <div className="font-bold text-toss-text mb-3">차트 정보</div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="bg-toss-gray/50 rounded-xl p-3">
+                  <div className="text-xs text-toss-subtext mb-1">터치 날짜</div>
+                  <div className="font-bold text-toss-text">{selectedPoint.date}</div>
+                </div>
+
+                <div className="bg-toss-gray/50 rounded-xl p-3">
+                  <div className="text-xs text-toss-subtext mb-1">터치 낙폭</div>
+                  <div className="font-bold text-toss-text">{formatPct(selectedPoint.dd)}</div>
+                </div>
+
+                <div className="bg-toss-gray/50 rounded-xl p-3">
+                  <div className="text-xs text-toss-subtext mb-1">터치 가격</div>
+                  <div className="font-bold text-toss-text">{formatNum(selectedPoint.price)}</div>
+                </div>
+
+                <div className="bg-red-50 rounded-xl p-3 border border-red-100">
+                  <div className="text-xs text-red-500 mb-1">목표선</div>
+                  <div className="font-bold text-red-500">{formatPct(targetDd)}</div>
+                </div>
+              </div>
+
+              <div className="mt-4 pt-3 border-t border-gray-100">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="bg-gray-50 rounded-xl p-3">
+                    <div className="text-xs text-toss-subtext mb-1">MDD 날짜</div>
+                    <div className="font-bold text-toss-text">{mddDate || '-'}</div>
+                  </div>
+
+                  <div className="bg-gray-50 rounded-xl p-3">
+                    <div className="text-xs text-toss-subtext mb-1">MDD 낙폭</div>
+                    <div className="font-bold text-toss-text">{formatPct(mddValue)}</div>
+                  </div>
+                </div>
+
+                <div className="mt-3 text-xs">
+                  {isSelectedMdd ? (
+                    <span className="font-bold text-red-500">현재 터치 지점이 MDD입니다.</span>
+                  ) : (
+                    <span className="text-toss-subtext">현재 터치 지점은 MDD가 아닙니다.</span>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       );
     }
 
+    // -------------------------------------
+    // Main App
+    // -------------------------------------
     function App() {
-      useEffect(() => { window.__APP_MOUNTED__ = true; }, []);
+      useEffect(() => {
+        window.__APP_MOUNTED__ = true;
+      }, []);
 
       const [activeTab, setActiveTab] = useState('dashboard');
-      const [settings, setSettings] = useLocalStorage('mdd_settings_ratio_v1', DEFAULT_SETTINGS);
+      const [settings, setSettings] = useLocalStorage('mdd_settings_ratio_v3', DEFAULT_SETTINGS);
       const [reloadToken, setReloadToken] = useState(0);
-
       const [rawData, setRawData] = useState([]);
       const [dataSource, setDataSource] = useState('LOADING');
-      const [manualMode, setManualMode] = useState(null);
-
       const [assetsList, setAssetsList] = useState(FALLBACK_ASSETS);
       const [fetchStatus, setFetchStatus] = useState({
         assets: null,
@@ -767,7 +860,6 @@
         fx: null,
         error: null
       });
-
       const [fallbackSampleData] = useState(() => generateSampleData('SPY'));
       const fileInputRef = useRef(null);
 
@@ -786,23 +878,27 @@
             }
           })
           .catch(() => {
-            if (!isCancelled) {
-              setFetchStatus((prev) => ({ ...prev, assets: false }));
-            }
+            if (isCancelled) return;
+            setFetchStatus((prev) => ({ ...prev, assets: false }));
           });
 
         return () => { isCancelled = true; };
       }, []);
 
       useEffect(() => {
-        if (manualMode === 'IMPORTED' || manualMode === 'SAMPLE') return;
+        if (dataSource === 'IMPORTED') return;
 
         let isCancelled = false;
 
         async function loadPriceAndFx() {
           setDataSource('LOADING');
 
-          const nextStatus = { assets: fetchStatus.assets, price: false, fx: false, error: null };
+          const nextStatus = {
+            assets: true,
+            price: false,
+            fx: false,
+            error: null
+          };
 
           try {
             const [priceRes, fxRes] = await Promise.all([
@@ -810,12 +906,8 @@
               fetch('./data/fx/USDKRW.json').catch(() => null)
             ]);
 
-            if (!priceRes || !priceRes.ok) {
-              throw new Error(`${settings.symbol}.json 가격 파일을 불러오지 못했습니다.`);
-            }
-            if (!fxRes || !fxRes.ok) {
-              throw new Error('USDKRW.json 환율 파일을 불러오지 못했습니다.');
-            }
+            if (!priceRes || !priceRes.ok) throw new Error(`${settings.symbol}.json 가격 파일을 불러오지 못했습니다.`);
+            if (!fxRes || !fxRes.ok) throw new Error('USDKRW.json 환율 파일을 불러오지 못했습니다.');
 
             nextStatus.price = true;
             nextStatus.fx = true;
@@ -824,21 +916,23 @@
             const fxData = await fxRes.json();
 
             const merged = buildMergedSeries(priceData, fxData);
-            if (!merged || merged.length === 0) {
-              throw new Error('병합된 시계열 데이터가 비어 있습니다.');
-            }
+            if (!merged || merged.length === 0) throw new Error('병합된 시계열 데이터가 비어 있습니다.');
 
             if (!isCancelled) {
               setRawData(merged);
               setDataSource('FETCHED');
-              setFetchStatus(nextStatus);
+              setFetchStatus((prev) => ({ ...prev, ...nextStatus }));
             }
           } catch (err) {
-            nextStatus.error = err && err.message ? err.message : 'Unknown Error';
             if (!isCancelled) {
               setRawData(fallbackSampleData);
               setDataSource('SAMPLE');
-              setFetchStatus(nextStatus);
+              setFetchStatus((prev) => ({
+                ...prev,
+                price: false,
+                fx: false,
+                error: err && err.message ? err.message : 'Unknown Error'
+              }));
             }
           }
         }
@@ -846,7 +940,7 @@
         loadPriceAndFx();
 
         return () => { isCancelled = true; };
-      }, [settings.symbol, reloadToken, manualMode]);
+      }, [settings.symbol, reloadToken]);
 
       const meta = useMemo(
         () => getDataMeta(rawData, settings.startDate),
@@ -858,15 +952,10 @@
         let krwEngine = null;
         let configWarning = null;
 
-        const safeRatioStep = Number(settings.mddRatioStep);
-        const targetRatio = settings.assetType === 'ETF'
-          ? Number(settings.targetMddRatioEtf)
-          : Number(settings.targetMddRatioStock);
+        const safeBandStep = Number(settings.bandStep);
 
-        if (!Number.isFinite(safeRatioStep) || safeRatioStep <= 0) {
-          configWarning = 'MDD 비율 스텝은 0보다 큰 숫자여야 합니다.';
-        } else if (!Number.isFinite(targetRatio) || targetRatio <= 0 || targetRatio > 1) {
-          configWarning = 'MDD 기준 비율은 0보다 크고 1 이하이어야 합니다.';
+        if (!Number.isFinite(safeBandStep) || safeBandStep <= 0) {
+          configWarning = 'Band Step은 0보다 큰 숫자여야 합니다.';
         } else if (dataSource !== 'LOADING') {
           if (settings.currencyMode === 'USD' || settings.currencyMode === 'BOTH') {
             usdEngine = runEngine(rawData, 'closeUsd', meta.usdAnalysisStart, settings.endDate, settings);
@@ -913,21 +1002,16 @@
         const symbol = e.target.value;
         const assetInfo = assetsList.find((a) => a.symbol === symbol);
 
-        if (manualMode) setManualMode(null);
-
         setSettings((prev) => {
           const next = { ...prev, symbol };
           if (assetInfo) {
             next.assetType = assetInfo.assetType || prev.assetType;
-
-            if (assetInfo.assetType === 'ETF' && assetInfo.defaultTargetMddRatio !== undefined) {
-              next.targetMddRatioEtf = assetInfo.defaultTargetMddRatio;
+            if (assetInfo.defaultTargetMddRatio !== undefined) {
+              if ((assetInfo.assetType || prev.assetType) === 'ETF') next.targetMddRatioEtf = assetInfo.defaultTargetMddRatio;
+              else next.targetMddRatioStock = assetInfo.defaultTargetMddRatio;
             }
-            if (assetInfo.assetType === 'STOCK' && assetInfo.defaultTargetMddRatio !== undefined) {
-              next.targetMddRatioStock = assetInfo.defaultTargetMddRatio;
-            }
-            if (assetInfo.defaultMddRatioStep !== undefined) {
-              next.mddRatioStep = assetInfo.defaultMddRatioStep;
+            if (assetInfo.defaultBandStep !== undefined) {
+              next.bandStep = assetInfo.defaultBandStep;
             }
           }
           return next;
@@ -938,7 +1022,6 @@
       }
 
       function handleReloadServerData() {
-        setManualMode(null);
         setRawData([]);
         setDataSource('LOADING');
         setReloadToken((prev) => prev + 1);
@@ -946,17 +1029,9 @@
 
       function handleResetSampleData() {
         if (window.confirm('기본 SPY 샘플 데이터로 되돌리시겠습니까?')) {
-          setManualMode('SAMPLE');
-          setSettings((prev) => ({
-            ...prev,
-            symbol: 'SPY',
-            assetType: 'ETF',
-            targetMddRatioEtf: 0.80,
-            mddRatioStep: 0.05
-          }));
+          setSettings((prev) => ({ ...prev, symbol: 'SPY', assetType: 'ETF' }));
           setRawData(fallbackSampleData);
           setDataSource('SAMPLE');
-          setFetchStatus((prev) => ({ ...prev, error: null }));
         }
       }
 
@@ -988,8 +1063,8 @@
       function handleImport(e) {
         const file = e.target.files[0];
         if (!file) return;
-
         const reader = new FileReader();
+
         reader.onload = (event) => {
           try {
             const parsed = JSON.parse(event.target.result);
@@ -1002,15 +1077,17 @@
               }
 
               const usd = Number(row.closeUsd);
-              const rawKrw = row.closeKrw;
-              const krw = (rawKrw === null || rawKrw === undefined || rawKrw === '') ? null : Number(rawKrw);
-
               if (!Number.isFinite(usd) || usd <= 0) {
-                throw new Error(`${i + 1}번째 행: closeUsd 값이 유효한 양수 숫자가 아닙니다.`);
+                throw new Error(`${i + 1}번째 행: closeUsd 값이 유효한 양수가 아닙니다.`);
               }
 
-              if (krw !== null && (!Number.isFinite(krw) || krw <= 0)) {
-                throw new Error(`${i + 1}번째 행: closeKrw 값은 null 또는 유효한 양수 숫자여야 합니다.`);
+              let krw = null;
+              if (row.closeKrw !== null && row.closeKrw !== undefined && row.closeKrw !== '') {
+                const parsedKrw = Number(row.closeKrw);
+                if (!Number.isFinite(parsedKrw) || parsedKrw <= 0) {
+                  throw new Error(`${i + 1}번째 행: closeKrw 값은 null 또는 유효한 양수여야 합니다.`);
+                }
+                krw = parsedKrw;
               }
 
               return {
@@ -1020,10 +1097,8 @@
               };
             }).sort((a, b) => a.date.localeCompare(b.date));
 
-            setManualMode('IMPORTED');
             setRawData(normalized);
             setDataSource('IMPORTED');
-            setFetchStatus((prev) => ({ ...prev, error: null }));
             alert(`총 ${normalized.length}행의 사용자 데이터를 성공적으로 불러왔습니다.`);
           } catch (err) {
             alert(`데이터 형식 오류:\n${err.message}`);
@@ -1043,39 +1118,35 @@
 
         const lines = [];
         const primary = appState.primaryEngine;
-
         if (!primary) return ['엔진 설정 문제로 분석을 수행하지 못했습니다. 설정 탭을 확인해주세요.'];
 
         const usdCount = appState.usdEngine ? appState.usdEngine.timeSeries.length : 0;
         const krwCount = appState.krwEngine ? appState.krwEngine.timeSeries.length : 0;
 
         lines.push(`현재 분석 데이터 수는 USD ${usdCount}일, KRW ${krwCount}일입니다.`);
-        lines.push(`기간 MDD는 ${formatPct(primary.metrics.mdd)}이며, 설정한 추가매수 기준 비율은 ${formatPct(primary.target.mddRatio)}입니다.`);
-        lines.push(`따라서 기준 추가매수 낙폭은 ${formatPct(primary.target.dd)}입니다.`);
+        lines.push(`기간 MDD는 ${formatPct(primary.periodMdd)}이며, 설정 MDD 비율 ${formatPct(primary.target.ratio)} 기준선은 ${formatPct(primary.target.dd)}입니다.`);
 
         if (primary.target.signalCount > 0) {
-          lines.push(`이 기준을 과거에 처음 하향 돌파한 신호는 ${primary.target.signalCount}회였고, 손해보지 않고 회복한 확률은 ${formatPct(primary.target.winRate)}입니다.`);
+          lines.push(`그 기준선에서 과거 신호 수는 ${primary.target.signalCount}회이고 실제 승률은 ${formatPct(primary.target.winRate)}입니다.`);
         } else {
-          lines.push(`이 기준을 과거에 하향 돌파한 신호가 없어 승률 계산 표본이 없습니다.`);
+          lines.push(`그 기준선에서는 과거 신호가 없어 실제 승률을 계산할 수 없습니다.`);
         }
 
         if (primary.target.medianRecoveryDays !== null) {
-          lines.push(`이 기준의 중앙 회복일은 ${formatDays(primary.target.medianRecoveryDays)}입니다.`);
+          lines.push(`해당 기준의 중앙 회복일은 ${formatDays(primary.target.medianRecoveryDays)}입니다.`);
         }
 
-        if (primary.metrics.currentMddRatio !== null) {
-          lines.push(`현재 낙폭은 기간 MDD 대비 ${formatPct(primary.metrics.currentMddRatio)} 수준입니다.`);
+        if (primary.target.gapToTarget !== null) {
+          if (primary.target.gapToTarget >= 0) {
+            lines.push(`현재 낙폭이 목표 기준보다 더 깊어 규칙상 추가매수 가능 구간입니다.`);
+          } else {
+            lines.push(`현재 낙폭이 목표 기준보다 얕아 아직 ${formatPct(Math.abs(primary.target.gapToTarget))} 추가 하락이 더 필요합니다.`);
+          }
         }
 
-        if (primary.target.additionalDropNeededPct > 0) {
-          lines.push(`현재 낙폭은 기준선보다 얕습니다. 기준선까지 추가 하락 약 ${formatPct(primary.target.additionalDropNeededPct)}가 더 필요합니다.`);
-        } else {
-          lines.push(`현재 낙폭은 이미 기준선에 도달했거나 더 깊습니다.`);
-        }
-
-        lines.push(appState.gates.fearGate ? `공포 지수 조건은 충족되었습니다.` : `공포 지수 조건은 아직 충족되지 않았습니다.`);
-        lines.push(appState.gates.lifeGate ? `생활 게이트도 통과한 상태입니다.` : `생활 게이트가 미충족 상태입니다. 보수적 접근이 필요합니다.`);
-        lines.push(appState.gates.finalSignal ? `최종적으로 모든 조건이 맞아 실행 가능한 상태입니다.` : `아직 모든 조건이 맞지 않아 최종 실행 보류(WAIT) 상태입니다.`);
+        lines.push(appState.gates.fearGate ? '공포 지수 조건은 충족되었습니다.' : '공포 지수 조건은 아직 충족되지 않았습니다.');
+        lines.push(appState.gates.lifeGate ? '생활 게이트도 통과한 상태입니다.' : '생활 게이트가 미충족 상태입니다. 보수적 접근이 필요합니다.');
+        lines.push(appState.gates.finalSignal ? '최종적으로 모든 조건이 맞아 실행 가능한 상태입니다.' : '아직 모든 조건이 맞지 않아 최종 실행 보류(WAIT) 상태입니다.');
 
         return lines;
       }
@@ -1193,7 +1264,7 @@
                       <Badge active={appState.gates.fearGate} color={appState.gates.fearGate ? 'green' : 'red'}>{settings.fearGreedIndex}</Badge>
                     </div>
                     <div className="flex justify-between items-center bg-gray-50/80 p-2.5 rounded-lg">
-                      <span>MDD 기준선 도달 ({settings.primarySignalMode})</span>
+                      <span>기준 낙폭 도달 ({settings.primarySignalMode})</span>
                       <Badge active={appState.gates.ddGate} color={appState.gates.ddGate ? 'blue' : 'gray'}>{appState.gates.ddGate ? 'PASS' : 'FAIL'}</Badge>
                     </div>
                   </div>
@@ -1237,7 +1308,7 @@
                     <div className="mt-6 pt-5 border-t border-toss-gray space-y-3">
                       <div className="flex justify-between items-center bg-gray-50 p-3 rounded-lg">
                         <span className="text-sm font-bold text-toss-subtext">설정 MDD 비율</span>
-                        <span className="text-base font-bold text-toss-text">{formatPct(engine.target.mddRatio)}</span>
+                        <span className="text-base font-bold text-toss-text">{formatPct(engine.target.ratio)}</span>
                       </div>
 
                       <div className="flex justify-between items-center bg-gray-50 p-3 rounded-lg">
@@ -1256,13 +1327,13 @@
                       </div>
 
                       <div className="flex justify-between items-center bg-gray-50 p-3 rounded-lg">
-                        <span className="text-sm font-bold text-toss-subtext">추가 하락 필요</span>
-                        <span className={`text-base font-bold ${
-                          engine.target.additionalDropNeededPct > 0 ? 'text-red-500' : 'text-toss-blue'
-                        }`}>
-                          {engine.target.additionalDropNeededPct > 0
-                            ? `${formatPct(engine.target.additionalDropNeededPct)}`
-                            : '도달 완료'}
+                        <span className="text-sm font-bold text-toss-subtext">목표까지 거리 값 (Gap to Target)</span>
+                        <span className={`text-base font-bold ${engine.target.gapToTarget !== null && engine.target.gapToTarget >= 0 ? 'text-toss-blue' : 'text-red-500'}`}>
+                          {engine.target.gapToTarget === null
+                            ? '-'
+                            : engine.target.gapToTarget >= 0
+                              ? `도달 완료 (+${formatPct(engine.target.gapToTarget)})`
+                              : `${formatPct(Math.abs(engine.target.gapToTarget))} 추가 하락 필요`}
                         </span>
                       </div>
                     </div>
@@ -1291,30 +1362,29 @@
               const engine = mode === 'USD' ? appState.usdEngine : appState.krwEngine;
               if (!engine) return null;
 
-              return (
-                <Card key={mode} title={`${mode} MDD 비율 물타기 승률 테이블`}>
-                  <div className="text-xs text-toss-subtext mb-4">
-                    각 행은 “기간 MDD의 몇 % 지점에서 추가매수했을 때” 손해보지 않고 회복한 비율을 의미합니다.
-                  </div>
+              const currentRatio = engine.currentMddUsageRatio;
 
+              return (
+                <Card key={mode} title={`${mode} 물타기 승률 테이블`}>
                   <div className="overflow-x-auto -mx-5 md:mx-0">
                     <table className="w-full text-sm text-left whitespace-nowrap">
                       <thead className="bg-toss-gray text-toss-subtext border-b border-gray-200">
                         <tr>
                           <th className="py-3 px-5 font-semibold">MDD 비율</th>
-                          <th className="py-3 px-5 font-semibold">실제 낙폭</th>
+                          <th className="py-3 px-5 font-semibold">기준 낙폭</th>
                           <th className="py-3 px-5 font-semibold">신호 수</th>
-                          <th className="py-3 px-5 font-semibold">승률</th>
+                          <th className="py-3 px-5 font-semibold">실제 승률</th>
                           <th className="py-3 px-5 font-semibold">중앙 회복일</th>
-                          <th className="py-3 px-5 font-semibold">평균 회복일</th>
                           <th className="py-3 px-5 font-semibold">미회복</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {engine.ratioTable.map((r, i) => {
-                          const isTarget = sameScaled(r.ratio, engine.target.mddRatio);
-                          const rowClass = isTarget ? 'bg-toss-light/60' : '';
-                          const textClass = isTarget ? 'font-bold text-toss-blue' : 'text-toss-text';
+                        {engine.mddRatioTable.map((r, i) => {
+                          const step = Number(settings.bandStep);
+                          const isCurrentBand = currentRatio !== null && currentRatio <= r.ratio && currentRatio > (r.ratio - step);
+                          const isTarget = Math.abs(r.ratio - engine.target.ratio) < 0.000001;
+                          const rowClass = isTarget ? 'bg-toss-light/60' : isCurrentBand ? 'bg-yellow-50' : '';
+                          const textClass = isTarget ? 'font-bold text-toss-blue' : isCurrentBand ? 'font-bold text-amber-700' : 'text-toss-text';
 
                           return (
                             <tr key={i} className={`border-b border-gray-100 hover:bg-gray-50 transition-colors ${rowClass}`}>
@@ -1323,7 +1393,6 @@
                               <td className={`py-3 px-5 ${textClass}`}>{r.signalCount}회</td>
                               <td className={`py-3 px-5 ${textClass}`}>{formatPct(r.winRate)}</td>
                               <td className={`py-3 px-5 ${textClass}`}>{formatDays(r.medianRecoveryDays)}</td>
-                              <td className={`py-3 px-5 ${textClass}`}>{formatDays(r.avgRecoveryDays)}</td>
                               <td className={`py-3 px-5 ${textClass}`}>{r.loseCount}건</td>
                             </tr>
                           );
@@ -1332,8 +1401,8 @@
                     </table>
                   </div>
 
-                  <div className="mt-4 flex flex-wrap gap-2 text-xs">
-                    <Badge active={true} color="blue">파란색 = 현재 설정한 MDD 비율 구간</Badge>
+                  <div className="mt-4 text-xs text-toss-subtext">
+                    노란색은 현재 낙폭이 속한 MDD 비율 구간, 파란색은 현재 설정한 기준 비율입니다.
                   </div>
                 </Card>
               );
@@ -1349,10 +1418,10 @@
               <p className="text-sm text-toss-subtext mb-4">초보자를 위한 추천 설정값을 한 번에 적용할 수 있습니다.</p>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                 {[
-                  { label: 'ETF 기본', preset: { assetType: 'ETF', targetMddRatioEtf: 0.80, mddRatioStep: 0.05 } },
-                  { label: '개별주 기본', preset: { assetType: 'STOCK', targetMddRatioStock: 0.90, mddRatioStep: 0.05 } },
-                  { label: '보수형', preset: { targetMddRatioEtf: 0.90, targetMddRatioStock: 0.95, fearGreedIndex: 'Extreme Fear' } },
-                  { label: '공격형', preset: { targetMddRatioEtf: 0.70, targetMddRatioStock: 0.80, fearGreedIndex: 'Fear' } }
+                  { label: 'ETF 기본', preset: { assetType: 'ETF', targetMddRatioEtf: 0.80, bandStep: 0.05 } },
+                  { label: '개별주 기본', preset: { assetType: 'STOCK', targetMddRatioStock: 0.90, bandStep: 0.05 } },
+                  { label: '보수형', preset: { targetMddRatioEtf: 0.90, targetMddRatioStock: 0.95, fearGreedIndex: 'Extreme Fear', cashReady: true } },
+                  { label: '공격형', preset: { targetMddRatioEtf: 0.70, targetMddRatioStock: 0.80, fearGreedIndex: 'Fear', bandStep: 0.03 } }
                 ].map(({ label, preset }) => (
                   <button
                     key={label}
@@ -1378,7 +1447,7 @@
                   </div>
 
                   <div>
-                    <label className="block text-xs font-bold text-toss-subtext mb-1.5">Asset Type</label>
+                    <label className="block text-xs font-bold text-toss-subtext mb-1.5">Asset Type (기준 비율용)</label>
                     <select name="assetType" value={settings.assetType} onChange={handleSettingChange} className="w-full p-3 bg-toss-gray border-none rounded-xl text-sm font-medium focus:ring-2 focus:ring-toss-blue outline-none cursor-pointer">
                       <option value="ETF">ETF</option>
                       <option value="STOCK">STOCK</option>
@@ -1387,18 +1456,13 @@
 
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className="block text-xs font-bold text-toss-subtext mb-1.5">ETF MDD 기준 비율</label>
+                      <label className="block text-xs font-bold text-toss-subtext mb-1.5">ETF MDD 비율</label>
                       <input type="number" step="0.01" min="0.01" max="1" name="targetMddRatioEtf" value={settings.targetMddRatioEtf} onChange={handleSettingChange} className="w-full p-3 bg-toss-gray border-none rounded-xl text-sm font-medium outline-none" />
                     </div>
                     <div>
-                      <label className="block text-xs font-bold text-toss-subtext mb-1.5">STOCK MDD 기준 비율</label>
+                      <label className="block text-xs font-bold text-toss-subtext mb-1.5">STOCK MDD 비율</label>
                       <input type="number" step="0.01" min="0.01" max="1" name="targetMddRatioStock" value={settings.targetMddRatioStock} onChange={handleSettingChange} className="w-full p-3 bg-toss-gray border-none rounded-xl text-sm font-medium outline-none" />
                     </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-bold text-toss-subtext mb-1.5">MDD 비율 스텝</label>
-                    <input type="number" step="0.01" min="0.01" max="0.20" name="mddRatioStep" value={settings.mddRatioStep} onChange={handleSettingChange} className="w-full p-3 bg-toss-gray border-none rounded-xl text-sm font-medium outline-none" />
                   </div>
 
                   <div>
@@ -1413,8 +1477,8 @@
                   <div>
                     <label className="block text-xs font-bold text-toss-subtext mb-1.5">Primary Signal Mode</label>
                     <select name="primarySignalMode" value={settings.primarySignalMode} onChange={handleSettingChange} className="w-full p-3 bg-toss-gray border-none rounded-xl text-sm font-medium focus:ring-2 focus:ring-toss-blue outline-none cursor-pointer">
-                      <option value="USD">USD (달러 기준 판단)</option>
-                      <option value="KRW">KRW (원화 기준 판단)</option>
+                      <option value="USD">USD (달러 기준 엔진 우선)</option>
+                      <option value="KRW">KRW (원화 기준 엔진 우선)</option>
                     </select>
                   </div>
                 </div>
@@ -1429,6 +1493,12 @@
                       <label className="block text-xs font-bold text-toss-subtext mb-1.5">종료일</label>
                       <input type="date" name="endDate" value={settings.endDate} onChange={handleSettingChange} className="w-full p-3 bg-toss-gray border-none rounded-xl text-sm font-medium outline-none" />
                     </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-toss-subtext mb-1.5">Band Step (MDD 비율 단계)</label>
+                    <input type="number" step="0.01" min="0.01" max="0.20" name="bandStep" value={settings.bandStep} onChange={handleSettingChange} className="w-full p-3 bg-toss-gray border-none rounded-xl text-sm font-medium outline-none" />
+                    <p className="mt-2 text-xs text-toss-subtext">예: 0.05면 5%, 10%, 15% ... 100% 비율 구간으로 테이블을 만듭니다.</p>
                   </div>
 
                   <h4 className="font-bold text-toss-text flex items-center pt-4">
@@ -1450,6 +1520,7 @@
                       <input type="checkbox" name="cashReady" checked={settings.cashReady} onChange={handleSettingChange} className="w-5 h-5 text-toss-blue border-gray-300 rounded focus:ring-toss-blue" />
                       <span className="text-sm font-bold text-toss-text">만기 자금 현금 확보 완료 (Cash Ready)</span>
                     </label>
+
                     <label className="flex items-center space-x-3 cursor-pointer">
                       <input type="checkbox" name="incomeGreater" checked={settings.incomeGreater} onChange={handleSettingChange} className="w-5 h-5 text-toss-blue border-gray-300 rounded focus:ring-toss-blue" />
                       <span className="text-sm font-bold text-toss-text">소득이 지출 초과 (Income &gt; Expense)</span>
@@ -1469,6 +1540,7 @@
                 <button onClick={handleResetSampleData} className="px-5 py-2.5 bg-gray-200 text-toss-text rounded-xl font-bold text-sm hover:bg-gray-300 transition-colors shadow-sm">SPY 샘플 데이터 리셋</button>
                 <button onClick={handleTemplateDownload} className="px-5 py-2.5 bg-white border border-gray-200 text-toss-text rounded-xl font-bold text-sm hover:bg-gray-50 transition-colors shadow-sm">JSON 템플릿 다운로드</button>
                 <button onClick={handleExport} className="px-5 py-2.5 bg-white border border-gray-200 text-toss-text rounded-xl font-bold text-sm hover:bg-gray-50 transition-colors shadow-sm">현재 데이터 내보내기</button>
+
                 <div className="relative">
                   <input type="file" accept=".json" ref={fileInputRef} onChange={handleImport} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
                   <button className="w-full px-5 py-2.5 bg-toss-text text-white rounded-xl font-bold text-sm hover:bg-gray-700 transition-colors shadow-sm pointer-events-none">수동 데이터 불러오기</button>
@@ -1486,28 +1558,20 @@
         let usdPositive = true;
 
         for (let i = 0; i < rawData.length - 1; i++) {
-          if (rawData[i].date > rawData[i + 1].date) {
-            isAscending = false;
-            break;
-          }
+          if (rawData[i].date > rawData[i + 1].date) { isAscending = false; break; }
         }
 
         for (let i = 0; i < rawData.length; i++) {
-          if (!isValidPositiveNumber(rawData[i].closeUsd)) {
-            usdPositive = false;
-            break;
-          }
+          if (!isValidPositiveNumber(rawData[i].closeUsd)) { usdPositive = false; break; }
         }
 
         const krwNullCount = rawData.filter((r) => r.closeKrw === null || r.closeKrw === undefined).length;
         const krwValidCount = rawData.filter((r) => isValidPositiveNumber(r.closeKrw)).length;
         const krwAnomalyCount = rawData.length - krwNullCount - krwValidCount;
-
-        const validRatioStep = Number.isFinite(Number(settings.mddRatioStep)) && Number(settings.mddRatioStep) > 0;
-        const targetRatio = settings.assetType === 'ETF' ? Number(settings.targetMddRatioEtf) : Number(settings.targetMddRatioStock);
-        const validTargetRatio = Number.isFinite(targetRatio) && targetRatio > 0 && targetRatio <= 1;
-        const hasRatioTable = primary && primary.ratioTable && primary.ratioTable.length > 0;
+        const validBandStep = Number.isFinite(Number(settings.bandStep)) && Number(settings.bandStep) > 0;
+        const hasRatioTable = primary && primary.mddRatioTable && primary.mddRatioTable.length > 0;
         const targetExists = primary && primary.target && primary.target.dd !== null;
+
         const krwStartCorrectlyAdjusted =
           meta.krwAnalysisStart !== null &&
           meta.krwFirstDate !== null &&
@@ -1519,15 +1583,14 @@
           { id: 'F3', name: 'USDKRW 환율 로드', expected: 'TRUE', actual: fetchStatus.fx === true ? 'TRUE' : (dataSource === 'SAMPLE' || dataSource === 'IMPORTED' ? 'SKIP' : 'FALSE'), pass: dataSource === 'SAMPLE' || dataSource === 'IMPORTED' ? null : fetchStatus.fx === true },
           { id: 'D1', name: '날짜 오름차순 정렬', expected: 'TRUE', actual: isAscending ? 'TRUE' : 'FALSE', pass: isAscending },
           { id: 'D2', name: 'USD 가격 양수 여부', expected: 'TRUE', actual: usdPositive ? 'TRUE' : 'FALSE', pass: usdPositive },
-          { id: 'D3', name: '유효한 MDD 비율 스텝', expected: 'TRUE', actual: validRatioStep ? 'TRUE' : 'FALSE', pass: validRatioStep },
-          { id: 'D4', name: '유효한 목표 MDD 비율', expected: 'TRUE', actual: validTargetRatio ? 'TRUE' : 'FALSE', pass: validTargetRatio },
+          { id: 'D3', name: '유효한 Band Step', expected: 'TRUE', actual: validBandStep ? 'TRUE' : 'FALSE', pass: validBandStep },
           { id: 'K1', name: 'KRW 유효 행 수 > 0', expected: '> 0', actual: String(krwValidCount), pass: krwValidCount > 0 },
           { id: 'K2', name: 'KRW 이상값 행 수 (0이어야 정상)', expected: '0', actual: String(krwAnomalyCount), pass: krwAnomalyCount === 0 },
           { id: 'K3', name: 'KRW 시작일 보정 정상', expected: 'TRUE', actual: krwStartCorrectlyAdjusted ? 'TRUE' : (meta.krwFirstDate === null ? 'SKIP' : 'FALSE'), pass: meta.krwFirstDate === null ? null : krwStartCorrectlyAdjusted },
           { id: 'E1', name: '엔진 실행 성공', expected: 'TRUE', actual: primary ? 'TRUE' : 'FALSE', pass: primary ? true : false },
-          { id: 'E2', name: 'MDD <= 0', expected: '<= 0', actual: primary ? primary.metrics.mdd.toFixed(4) : 'N/A', pass: primary ? primary.metrics.mdd <= 0 : null },
+          { id: 'E2', name: '기간 MDD <= 0', expected: '<= 0', actual: primary ? primary.metrics.mdd.toFixed(4) : 'N/A', pass: primary ? primary.metrics.mdd <= 0 : null },
           { id: 'R1', name: 'MDD 비율 테이블 생성', expected: 'TRUE', actual: hasRatioTable ? 'TRUE' : 'FALSE', pass: hasRatioTable },
-          { id: 'R2', name: '선택 비율 기준 낙폭 계산 성공', expected: 'TRUE', actual: targetExists ? 'TRUE' : 'FALSE', pass: targetExists },
+          { id: 'R2', name: '목표 기준 낙폭 계산 성공', expected: 'TRUE', actual: targetExists ? 'TRUE' : 'FALSE', pass: targetExists },
           { id: 'R3', name: '최종 Buy Signal 논리 일치', expected: appState.gates.finalSignal ? 'TRUE' : 'FALSE', actual: (appState.gates.lifeGate && appState.gates.marketGate) ? 'TRUE' : 'FALSE', pass: appState.gates.finalSignal === (appState.gates.lifeGate && appState.gates.marketGate) }
         ];
 
@@ -1573,6 +1636,12 @@
                   </div>
                 ))}
               </div>
+
+              <div className="mt-4 text-xs text-toss-subtext space-y-1">
+                <p>• KRW null 행: 환율 데이터 시작 전 구간으로 정상입니다.</p>
+                <p>• KRW 이상값 행: 0, NaN, 음수 등 비정상 값입니다. 0이어야 정상입니다.</p>
+                <p>• KRW 실분석 시작일: {meta.krwAnalysisStart || '-'} / KRW 최초 유효일: {meta.krwFirstDate || '-'}</p>
+              </div>
             </Card>
           </div>
         );
@@ -1583,19 +1652,19 @@
           <div className="space-y-6 animate-fade-in pb-10">
             <Card title="1. 이 앱이 하는 일">
               <ul className="space-y-2 text-sm text-toss-text font-medium">
-                <li className="flex items-start"><span className="text-toss-blue mr-2">•</span> 종가 기준으로 현재 하락폭(DD)과 기간 최대낙폭(MDD)을 계산합니다.</li>
-                <li className="flex items-start"><span className="text-toss-blue mr-2">•</span> 사용자가 정한 <b>MDD 기준 비율</b>에 따라 “어느 정도 빠졌을 때 추가매수할지” 기준선을 만듭니다.</li>
-                <li className="flex items-start"><span className="text-toss-blue mr-2">•</span> 그 기준선을 하향 돌파했을 때 실제로 손해보지 않고 회복했는지 과거 승률을 계산합니다.</li>
+                <li className="flex items-start"><span className="text-toss-blue mr-2">•</span> 기간 MDD를 먼저 계산합니다.</li>
+                <li className="flex items-start"><span className="text-toss-blue mr-2">•</span> 설정한 MDD 비율만큼 내려온 지점을 기준 추가매수선으로 계산합니다.</li>
+                <li className="flex items-start"><span className="text-toss-blue mr-2">•</span> 그 기준선을 과거에 처음 하향 돌파했을 때 손해보지 않고 올라올 확률을 승률로 보여줍니다.</li>
               </ul>
             </Card>
 
             <Card title="2. 핵심 개념">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {[
-                  { title: '기간 MDD', desc: '선택한 분석 기간 안에서 나온 가장 깊은 하락폭입니다. 이 값을 100% 기준으로 봅니다.' },
-                  { title: 'MDD 기준 비율', desc: '예: 0.80이면 기간 MDD의 80% 깊이에서 추가매수한다는 뜻입니다.' },
-                  { title: '실제 승률', desc: '그 기준선을 하향 돌파했을 때 매수했다고 가정하면, 이후 손해보지 않고 회복한 비율입니다.' },
-                  { title: '중앙 회복일', desc: '회복까지 걸린 일수의 중앙값입니다. 평균보다 왜곡이 적습니다.' }
+                  { title: '기간 MDD', desc: '선택한 기간 안에서 가장 깊었던 최대 낙폭입니다.' },
+                  { title: 'MDD 비율', desc: '기간 MDD의 몇 % 지점을 기준 추가매수선으로 삼을지 정하는 값입니다. 예: 0.8 = 기간 MDD의 80% 지점.' },
+                  { title: '기준 추가매수 낙폭', desc: '기간 MDD × 설정 비율로 계산된 실제 낙폭선입니다.' },
+                  { title: '실제 승률', desc: '그 기준선을 하향 돌파해 추가매수했다고 가정했을 때 이후 본전 이상으로 회복한 비율입니다.' }
                 ].map(({ title, desc }) => (
                   <div key={title} className="bg-gray-50 p-4 rounded-xl">
                     <p className="font-bold text-toss-blue mb-1">{title}</p>
@@ -1605,21 +1674,29 @@
               </div>
             </Card>
 
-            <Card title="3. 해석 예시">
-              <div className="space-y-2 text-sm text-toss-text">
-                <p>예를 들어 기간 MDD가 <b>-30%</b>이고, 내가 설정한 비율이 <b>0.80</b>이라면:</p>
-                <p className="font-semibold text-toss-blue">기준 추가매수 낙폭 = -30% × 0.80 = -24%</p>
-                <p>즉, 낙폭이 -24%에 도달했을 때 추가매수하는 규칙이다.</p>
-                <p>그 규칙을 과거 전체 구간에 적용해서, 이후 손해보지 않고 회복한 확률을 승률 테이블에 보여준다.</p>
-              </div>
-            </Card>
-
-            <Card title="4. 이 앱이 하지 않는 일">
+            <Card title="3. 이 앱이 하지 않는 일">
               <ul className="space-y-2 text-sm text-red-600 font-medium">
                 <li className="flex items-start"><span className="mr-2">•</span> 미래 가격을 예측하지 않습니다.</li>
                 <li className="flex items-start"><span className="mr-2">•</span> 자동 매매를 실행하지 않습니다.</li>
-                <li className="flex items-start"><span className="mr-2">•</span> 배당재투자(PV 기준) MDD는 아직 적용하지 않았습니다. 현재는 종가 기준입니다.</li>
+                <li className="flex items-start"><span className="mr-2">•</span> 현재는 종가 기준 분석이며 PV 기준 MDD는 아직 적용하지 않았습니다.</li>
               </ul>
+            </Card>
+
+            <Card title="4. 사용 흐름">
+              <ol className="space-y-4 text-sm text-toss-text">
+                {[
+                  '자산과 기간을 선택합니다.',
+                  'MDD 비율을 입력합니다. 예: 0.80 = 기간 MDD의 80% 지점.',
+                  '대시보드에서 기준 추가매수 낙폭과 현재 낙폭을 비교합니다.',
+                  '승률 테이블에서 실제 승률과 중앙 회복일을 확인합니다.',
+                  '생활 게이트와 시장 게이트를 함께 보고 실행 여부를 판단합니다.'
+                ].map((step, i) => (
+                  <li key={i} className="flex items-center">
+                    <span className="bg-toss-blue text-white w-6 h-6 rounded-full flex items-center justify-center mr-3 font-bold shrink-0">{i + 1}</span>
+                    {step}
+                  </li>
+                ))}
+              </ol>
             </Card>
           </div>
         );
