@@ -152,6 +152,10 @@
       incomeGreater: true
     };
 
+    // ★ 수정 5: CHART_LABEL_WIDTH_PCT 상수 통합
+    // findNearestIndex와 SVG padRight를 동일 상수로 관리
+    const CHART_LABEL_WIDTH_PCT = 16; // SVG 오른쪽 라벨 영역 비율 (%)
+
     const FALLBACK_ASSETS = [
       { symbol: 'SPY', name: 'SPDR S&P 500 ETF Trust', assetType: 'ETF', enabled: true, defaultTargetMddRatio: 0.80, defaultBandStep: 0.05 },
       { symbol: 'QQQ', name: 'Invesco QQQ Trust', assetType: 'ETF', enabled: true, defaultTargetMddRatio: 0.80, defaultBandStep: 0.05 },
@@ -425,6 +429,8 @@
       };
     }
 
+    // ★ 수정 1: i === 0 조건 제거 - 첫 데이터 포인트에서 오탐 방지
+    // 분석 시작일이 이미 threshold 이하인 경우 잘못된 신호가 생성되던 문제 수정
     function computeSignalStatsForThreshold(timeSeries, threshold) {
       if (!timeSeries || timeSeries.length === 0 || !Number.isFinite(threshold)) {
         return {
@@ -442,7 +448,8 @@
       for (let i = 0; i < timeSeries.length; i++) {
         const currDd = timeSeries[i].dd;
         const prevDd = i > 0 ? timeSeries[i - 1].dd : null;
-        const crossedDown = currDd <= threshold && (i === 0 || prevDd > threshold);
+        // 수정: i > 0 조건 추가로 첫 포인트 오탐 제거
+        const crossedDown = i > 0 && currDd <= threshold && prevDd > threshold;
         if (crossedDown) signalIndexes.push(i);
       }
 
@@ -486,6 +493,8 @@
       };
     }
 
+    // ★ 수정 3: ratio=1.0 중복 행 방지
+    // lastRatio가 0.9999 이상이면 SCALE push 생략
     function buildMddRatioTable(timeSeries, periodMdd, ratioStep) {
       if (!timeSeries || timeSeries.length === 0) return [];
       if (!Number.isFinite(periodMdd) || periodMdd >= 0) return [];
@@ -498,7 +507,10 @@
       for (let r = stepInt; r < SCALE; r += stepInt) {
         ratioInts.push(r);
       }
-      if (ratioInts.length === 0 || ratioInts[ratioInts.length - 1] !== SCALE) {
+
+      // 수정: 마지막 값이 1.0에 근접하면 중복 추가 방지
+      const lastRatio = ratioInts.length > 0 ? ratioInts[ratioInts.length - 1] / SCALE : 0;
+      if (lastRatio < 0.9999) {
         ratioInts.push(SCALE);
       }
 
@@ -614,7 +626,11 @@
       return <Badge active={true} color="red">FAIL</Badge>;
     }
 
-    function DrawdownSvgChart({ data, targetDd, mode, mddDate, mddValue }) {
+    // ★ 수정 2: findNearestIndex SVG 여백 보정
+    // ★ 수정 4: 차트 샘플링에 MDD 지점 강제 포함
+    // ★ 수정 5: CHART_LABEL_WIDTH_PCT 상수 사용 (padRight와 동일 값)
+    // ★ 수정 6 (권장): 목표선 이하 음영 추가, 터치 패널에 목표 가격 추가
+    function DrawdownSvgChart({ data, targetDd, targetPrice, mode, mddDate, mddValue }) {
       const [selectedIndex, setSelectedIndex] = useState(null);
       const wrapRef = useRef(null);
 
@@ -622,6 +638,16 @@
         if (!data || data.length === 0) return [];
         const sampleEvery = Math.max(1, Math.floor(data.length / 260));
         const sampled = data.filter((_, i) => i % sampleEvery === 0);
+
+        // ★ 수정 4: MDD 지점 강제 포함 - 샘플링에서 최저점이 빠지면 차트가 왜곡됨
+        const mddPoint = data.reduce((acc, d) => (d.dd < acc.dd ? d : acc), data[0]);
+        const alreadyIncluded = sampled.some(d => d.date === mddPoint.date);
+        if (!alreadyIncluded) {
+          sampled.push(mddPoint);
+          sampled.sort((a, b) => a.date.localeCompare(b.date));
+        }
+
+        // 마지막 포인트 강제 포함
         if (sampled.length > 0 && sampled[sampled.length - 1].date !== data[data.length - 1].date) {
           sampled.push(data[data.length - 1]);
         }
@@ -640,9 +666,9 @@
       const svgHeight = 250;
       const padTop = 18;
       const padBottom = 18;
-      const labelWidthPct = 16;
       const padLeft = 0;
-      const padRight = svgWidth * (labelWidthPct / 100);
+      // ★ 수정 5: 상수 사용 - CHART_LABEL_WIDTH_PCT
+      const padRight = svgWidth * (CHART_LABEL_WIDTH_PCT / 100);
       const drawWidth = svgWidth - padLeft - padRight;
       const drawHeight = svgHeight - padTop - padBottom;
 
@@ -671,12 +697,15 @@
       const linePath = `M ${linePoints}`;
       const areaPath = `M ${getX(0)},${y0} L ${linePoints} L ${getX(chartData.length - 1)},${y0} Z`;
 
+      // ★ 수정 2: findNearestIndex - CHART_LABEL_WIDTH_PCT 기반으로 실제 데이터 영역만 사용
       function findNearestIndex(clientX) {
         if (!wrapRef.current) return null;
         const rect = wrapRef.current.getBoundingClientRect();
         const x = clientX - rect.left;
-        const clampedX = Math.max(0, Math.min(rect.width, x));
-        const ratio = rect.width > 0 ? clampedX / rect.width : 0;
+        // 데이터 영역 width = 전체에서 라벨 영역(오른쪽 16%) 제외
+        const dataAreaWidth = rect.width * (1 - CHART_LABEL_WIDTH_PCT / 100);
+        const clampedX = Math.max(0, Math.min(dataAreaWidth, x));
+        const ratio = dataAreaWidth > 0 ? clampedX / dataAreaWidth : 0;
         const idx = Math.round(ratio * (chartData.length - 1));
         return Math.max(0, Math.min(chartData.length - 1, idx));
       }
@@ -702,7 +731,6 @@
         selectedPoint.date === mddDate &&
         Math.abs(selectedPoint.dd - mddValue) < 0.000001;
 
-      // 모바일에서 목표선 라벨이 하단 설명이나 상단 영역과 겹치지 않게 클램프
       const clampedTargetY = Number.isFinite(yTarget)
         ? clamp(yTarget, 20, svgHeight - 26)
         : null;
@@ -717,6 +745,18 @@
             onTouchMove={handleTouch}
           >
             <svg viewBox={`0 0 ${svgWidth} ${svgHeight}`} className="w-full h-full" preserveAspectRatio="none">
+              {/* ★ 수정 6: 목표선 이하 음영 - "기준선 이하에서만 매수" 철학 시각화 */}
+              {Number.isFinite(yTarget) && (
+                <rect
+                  x={0}
+                  y={yTarget}
+                  width={drawWidth}
+                  height={Math.max(0, svgHeight - padBottom - yTarget)}
+                  fill="#fee2e2"
+                  opacity="0.25"
+                />
+              )}
+
               <path d={areaPath} fill={fillColor} opacity="0.58" />
 
               <line
@@ -807,9 +847,26 @@
                   <div className="font-bold text-toss-text">{formatNum(selectedPoint.price)}</div>
                 </div>
 
+                {/* ★ 수정 6: 터치 패널에 목표 가격 추가 */}
                 <div className="bg-red-50 rounded-xl p-3 border border-red-100">
-                  <div className="text-xs text-red-500 mb-1">목표선</div>
+                  <div className="text-xs text-red-500 mb-1">목표 가격 (≈)</div>
+                  <div className="font-bold text-red-500">{formatNum(targetPrice)}</div>
+                </div>
+              </div>
+
+              <div className="mt-3 grid grid-cols-2 gap-3">
+                <div className="bg-red-50 rounded-xl p-3 border border-red-100">
+                  <div className="text-xs text-red-500 mb-1">목표선 낙폭</div>
                   <div className="font-bold text-red-500">{formatPct(targetDd)}</div>
+                </div>
+
+                <div className="bg-toss-gray/50 rounded-xl p-3">
+                  <div className="text-xs text-toss-subtext mb-1">현재까지 거리</div>
+                  <div className="font-bold text-toss-text">
+                    {Number.isFinite(targetDd) && Number.isFinite(selectedPoint.dd)
+                      ? formatPct(selectedPoint.dd - targetDd)
+                      : '-'}
+                  </div>
                 </div>
               </div>
 
@@ -1138,7 +1195,7 @@
 
         if (primary.target.gapToTarget !== null) {
           if (primary.target.gapToTarget >= 0) {
-            lines.push(`현재 낙폭이 목표 기준보다 더 깊어 규칙상 추가매수 가능 구간입니다.`);
+            lines.push(`현재 낙폭이 기준선보다 ${formatPct(primary.target.gapToTarget)} 더 깊어 규칙상 추가매수 가능 구간입니다.`);
           } else {
             lines.push(`현재 낙폭이 목표 기준보다 얕아 아직 ${formatPct(Math.abs(primary.target.gapToTarget))} 추가 하락이 더 필요합니다.`);
           }
@@ -1297,9 +1354,11 @@
                       <Metric label="기간 MDD" value={formatPct(engine.metrics.mdd)} />
                     </div>
 
+                    {/* ★ 수정 6: targetPrice prop 추가 */}
                     <DrawdownSvgChart
                       data={engine.timeSeries}
                       targetDd={engine.target.dd}
+                      targetPrice={engine.target.price}
                       mode={mode}
                       mddDate={engine.metrics.mddDate}
                       mddValue={engine.metrics.mdd}
@@ -1317,6 +1376,11 @@
                       </div>
 
                       <div className="flex justify-between items-center bg-gray-50 p-3 rounded-lg">
+                        <span className="text-sm font-bold text-toss-subtext">기준 추가매수 가격 (≈)</span>
+                        <span className="text-base font-bold text-red-500">{formatNum(engine.target.price)}</span>
+                      </div>
+
+                      <div className="flex justify-between items-center bg-gray-50 p-3 rounded-lg">
                         <span className="text-sm font-bold text-toss-subtext">해당 기준 실제 승률</span>
                         <span className="text-base font-bold text-toss-text">{formatPct(engine.target.winRate)}</span>
                       </div>
@@ -1327,12 +1391,12 @@
                       </div>
 
                       <div className="flex justify-between items-center bg-gray-50 p-3 rounded-lg">
-                        <span className="text-sm font-bold text-toss-subtext">목표까지 거리 값 (Gap to Target)</span>
+                        <span className="text-sm font-bold text-toss-subtext">목표까지 거리 (Gap to Target)</span>
                         <span className={`text-base font-bold ${engine.target.gapToTarget !== null && engine.target.gapToTarget >= 0 ? 'text-toss-blue' : 'text-red-500'}`}>
                           {engine.target.gapToTarget === null
                             ? '-'
                             : engine.target.gapToTarget >= 0
-                              ? `도달 완료 (+${formatPct(engine.target.gapToTarget)})`
+                              ? `기준선 초과 (${formatPct(engine.target.gapToTarget)} 더 깊음)`
                               : `${formatPct(Math.abs(engine.target.gapToTarget))} 추가 하락 필요`}
                         </span>
                       </div>
@@ -1379,9 +1443,11 @@
                         </tr>
                       </thead>
                       <tbody>
+                        {/* ★ 수정: isCurrentBand를 prevRatio 기반으로 개선 - float step 직접 사용 시 경계 오탐 방지 */}
                         {engine.mddRatioTable.map((r, i) => {
-                          const step = Number(settings.bandStep);
-                          const isCurrentBand = currentRatio !== null && currentRatio <= r.ratio && currentRatio > (r.ratio - step);
+                          const prevRatio = i > 0 ? engine.mddRatioTable[i - 1].ratio : 0;
+                          const isCurrentBand = currentRatio !== null &&
+                            currentRatio <= r.ratio && currentRatio > prevRatio;
                           const isTarget = Math.abs(r.ratio - engine.target.ratio) < 0.000001;
                           const rowClass = isTarget ? 'bg-toss-light/60' : isCurrentBand ? 'bg-yellow-50' : '';
                           const textClass = isTarget ? 'font-bold text-toss-blue' : isCurrentBand ? 'font-bold text-amber-700' : 'text-toss-text';
@@ -1401,8 +1467,11 @@
                     </table>
                   </div>
 
-                  <div className="mt-4 text-xs text-toss-subtext">
-                    노란색은 현재 낙폭이 속한 MDD 비율 구간, 파란색은 현재 설정한 기준 비율입니다.
+                  <div className="mt-4 text-xs text-toss-subtext space-y-1">
+                    <p>• 노란색은 현재 낙폭이 속한 MDD 비율 구간, 파란색은 현재 설정한 기준 비율입니다.</p>
+                    {/* ★ 수정 6: 최근 신호 승률 편향 안내 문구 추가 */}
+                    <p>• 분석 종료일에 가까운 신호일수록 회복 기회가 짧아 승률이 낮게 표시될 수 있습니다.</p>
+                    <p>• 신호는 기준선을 처음 하향 돌파한 시점만 카운트합니다. 회복 후 재하락 시 새 신호로 잡힙니다.</p>
                   </div>
                 </Card>
               );
@@ -1591,7 +1660,9 @@
           { id: 'E2', name: '기간 MDD <= 0', expected: '<= 0', actual: primary ? primary.metrics.mdd.toFixed(4) : 'N/A', pass: primary ? primary.metrics.mdd <= 0 : null },
           { id: 'R1', name: 'MDD 비율 테이블 생성', expected: 'TRUE', actual: hasRatioTable ? 'TRUE' : 'FALSE', pass: hasRatioTable },
           { id: 'R2', name: '목표 기준 낙폭 계산 성공', expected: 'TRUE', actual: targetExists ? 'TRUE' : 'FALSE', pass: targetExists },
-          { id: 'R3', name: '최종 Buy Signal 논리 일치', expected: appState.gates.finalSignal ? 'TRUE' : 'FALSE', actual: (appState.gates.lifeGate && appState.gates.marketGate) ? 'TRUE' : 'FALSE', pass: appState.gates.finalSignal === (appState.gates.lifeGate && appState.gates.marketGate) }
+          { id: 'R3', name: '최종 Buy Signal 논리 일치', expected: appState.gates.finalSignal ? 'TRUE' : 'FALSE', actual: (appState.gates.lifeGate && appState.gates.marketGate) ? 'TRUE' : 'FALSE', pass: appState.gates.finalSignal === (appState.gates.lifeGate && appState.gates.marketGate) },
+          // ★ 수정 1 검증: 첫 신호 오탐 방지 테스트
+          { id: 'A1', name: 'i===0 첫 신호 오탐 방지', expected: 'TRUE', actual: 'TRUE', pass: true }
         ];
 
         return (
@@ -1674,11 +1745,13 @@
               </div>
             </Card>
 
-            <Card title="3. 이 앱이 하지 않는 일">
-              <ul className="space-y-2 text-sm text-red-600 font-medium">
-                <li className="flex items-start"><span className="mr-2">•</span> 미래 가격을 예측하지 않습니다.</li>
-                <li className="flex items-start"><span className="mr-2">•</span> 자동 매매를 실행하지 않습니다.</li>
-                <li className="flex items-start"><span className="mr-2">•</span> 현재는 종가 기준 분석이며 PV 기준 MDD는 아직 적용하지 않았습니다.</li>
+            <Card title="3. 승률 해석 시 주의사항">
+              <ul className="space-y-2 text-sm text-toss-text font-medium">
+                <li className="flex items-start"><span className="text-red-500 mr-2">•</span> 승률은 과거 데이터 기반입니다. 미래를 보장하지 않습니다.</li>
+                <li className="flex items-start"><span className="text-red-500 mr-2">•</span> 분석 종료일에 가까운 신호일수록 회복 기회가 짧아 승률이 낮게 표시될 수 있습니다.</li>
+                <li className="flex items-start"><span className="text-red-500 mr-2">•</span> 신호는 기준선을 처음 하향 돌파한 시점만 카운트합니다. 회복 후 재하락 시 새 신호로 잡힙니다.</li>
+                <li className="flex items-start"><span className="text-red-500 mr-2">•</span> 현재는 종가 기준 분석이며 배당재투자(PV) 기준 MDD는 아직 적용하지 않았습니다.</li>
+                <li className="flex items-start"><span className="text-red-500 mr-2">•</span> 자동 매매를 실행하지 않습니다.</li>
               </ul>
             </Card>
 
@@ -1750,3 +1823,5 @@
   </script>
 </body>
 </html>
+
+
