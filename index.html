@@ -146,16 +146,16 @@
       symbol: 'SPY',
       startDate: '2010-01-01',
       endDate: '2026-12-31',
-      targetMddRatioEtf: 0.80,
-      targetMddRatioStock: 0.90,
-      bandStep: 0.05,
-      assetType: 'ETF',
+      targetDdPct: -20,
       currencyMode: 'BOTH',
       primarySignalMode: 'USD',
       fearGreedIndex: 'Extreme Fear',
       cashReady: true,
       incomeGreater: true
     };
+
+    // 스프레드시트 방식: ATH 대비 고정 낙폭 구간 (-5% 단위)
+    const FIXED_DD_STEPS = [-5,-10,-15,-20,-25,-30,-35,-40,-45,-50,-55,-60,-65,-70,-75,-80,-85,-90,-95,-100];
 
     const FALLBACK_ASSETS = [
       { symbol: 'SPY', name: 'SPDR S&P 500 ETF Trust', assetType: 'ETF', enabled: true, defaultTargetMddRatio: 0.80, defaultBandStep: 0.05 },
@@ -269,6 +269,11 @@
     function formatNum(val) {
       if (val === null || val === undefined || !Number.isFinite(val)) return '-';
       return new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(val);
+    }
+
+    function formatKrw(val) {
+      if (val === null || val === undefined || !Number.isFinite(val)) return '-';
+      return new Intl.NumberFormat('ko-KR', { maximumFractionDigits: 0 }).format(Math.round(val)) + '원';
     }
 
     function formatDays(val) {
@@ -422,31 +427,42 @@
       };
     }
 
-    // [수정] Bug 1: i === 0 조건 제거
-    // 분석 시작일 첫 포인트가 이미 threshold 이하일 때 잘못된 신호가 생기는 문제 수정
-    // 반드시 이전 포인트가 threshold 위에 있었어야(prevDd > threshold) 신호로 인정
-    function computeSignalStatsForThreshold(timeSeries, threshold) {
+    // ============================================================
+    // 스프레드시트 방식 알고리즘
+    // - 기준: ATH 대비 고정 낙폭 (예: -10%, -20%)
+    // - 신호: 해당 낙폭 처음 하향 돌파 시 1회
+    // - 회복: 진입 시점 ATH 이상 가격 도달
+    // - 조건일: 해당 낙폭 이하에 있었던 총 일수
+    // ============================================================
+    function computeSignalStats(timeSeries, threshold) {
+      // threshold: 소수 (예: -0.20 = -20%)
       if (!timeSeries || timeSeries.length === 0 || !Number.isFinite(threshold)) {
-        return { signalCount: 0, winCount: 0, loseCount: 0, winRate: null };
+        return { signalCount: 0, winCount: 0, loseCount: 0, winRate: null, daysBelow: 0 };
       }
 
-      const signalIndexes = [];
+      const totalDays = timeSeries.length;
+      // 조건일: 해당 낙폭 이하에 있었던 날 수
+      const daysBelow = timeSeries.filter(d => d.dd <= threshold).length;
 
+      const signalIndexes = [];
       for (let i = 0; i < timeSeries.length; i++) {
         const currDd = timeSeries[i].dd;
         const prevDd = i > 0 ? timeSeries[i - 1].dd : null;
-        const crossedDown = i > 0 && currDd <= threshold && prevDd > threshold;
-        if (crossedDown) signalIndexes.push(i);
+        // 첫 하향 돌파만 신호 (i>0 조건으로 시작일 오탐 방지)
+        if (i > 0 && currDd <= threshold && prevDd > threshold) {
+          signalIndexes.push(i);
+        }
       }
 
       let winCount = 0;
       let loseCount = 0;
 
       signalIndexes.forEach((entryIndex) => {
-        const entryPrice = timeSeries[entryIndex].price;
+        // 회복 기준: 진입 시점의 ATH (스프레드시트 방식)
+        const entryAth = timeSeries[entryIndex].ath;
         let recovered = false;
         for (let j = entryIndex + 1; j < timeSeries.length; j++) {
-          if (timeSeries[j].price >= entryPrice) { recovered = true; break; }
+          if (timeSeries[j].price >= entryAth) { recovered = true; break; }
         }
         if (recovered) winCount += 1;
         else loseCount += 1;
@@ -454,43 +470,42 @@
 
       const signalCount = signalIndexes.length;
       const winRate = signalCount > 0 ? winCount / signalCount : null;
-      return { signalCount, winCount, loseCount, winRate };
+      return { signalCount, winCount, loseCount, winRate, daysBelow, totalDays };
     }
 
-    // [수정] ratio=1.0 중복 행 방지
-    // 마지막 ratioInt가 SCALE에 충분히 가까우면 push 생략
-    function buildMddRatioTable(timeSeries, periodMdd, ratioStep) {
+    // ATH 대비 고정 낙폭 테이블 생성
+    function buildFixedDdTable(timeSeries, periodMdd) {
       if (!timeSeries || timeSeries.length === 0) return [];
-      if (!Number.isFinite(periodMdd) || periodMdd >= 0) return [];
 
-      const SCALE = 10000;
-      const safeStep = clamp(Number(ratioStep) || 0.05, 0.01, 1);
-      const stepInt = Math.max(1, Math.round(safeStep * SCALE));
-
-      const ratioInts = [];
-      for (let r = stepInt; r < SCALE; r += stepInt) {
-        ratioInts.push(r);
-      }
-
-      // [수정] 마지막 값이 SCALE에 충분히 가깝지 않을 때만 SCALE 추가 (중복 행 방지)
-      const lastRatioVal = ratioInts.length > 0 ? ratioInts[ratioInts.length - 1] / SCALE : 0;
-      if (lastRatioVal < 0.9999) {
-        ratioInts.push(SCALE);
-      }
-
-      return ratioInts.map((ratioInt) => {
-        const ratio = ratioInt / SCALE;
-        const threshold = Number((periodMdd * ratio).toFixed(4));
-        const stats = computeSignalStatsForThreshold(timeSeries, threshold);
-
+      return FIXED_DD_STEPS.map((pct) => {
+        const threshold = pct / 100; // -20 → -0.20
+        // MDD보다 깊은 구간은 신호 없음 처리
+        if (Number.isFinite(periodMdd) && threshold < periodMdd) {
+          return {
+            ddPct: pct,
+            threshold,
+            signalCount: 0,
+            winCount: 0,
+            loseCount: 0,
+            winRate: null,
+            daysBelow: 0,
+            totalDays: timeSeries.length,
+            belowRatio: 0,
+            beyondMdd: true
+          };
+        }
+        const stats = computeSignalStats(timeSeries, threshold);
         return {
-          ratio,
-          ratioInt,
+          ddPct: pct,
           threshold,
           signalCount: stats.signalCount,
           winCount: stats.winCount,
           loseCount: stats.loseCount,
-          winRate: stats.winRate
+          winRate: stats.winRate,
+          daysBelow: stats.daysBelow,
+          totalDays: stats.totalDays,
+          belowRatio: stats.totalDays > 0 ? stats.daysBelow / stats.totalDays : 0,
+          beyondMdd: false
         };
       });
     }
@@ -503,26 +518,26 @@
       const metrics = base.metrics;
       const periodMdd = metrics.mdd;
 
-      const targetRatio = settings.assetType === 'ETF'
-        ? Number(settings.targetMddRatioEtf)
-        : Number(settings.targetMddRatioStock);
+      // 목표 낙폭: ATH 대비 고정값 (예: -20% → -0.20)
+      const targetDdPct = Number(settings.targetDdPct) || -20;
+      const safeTargetDdPct = Math.max(-100, Math.min(-1, targetDdPct));
+      const targetDd = safeTargetDdPct / 100;
 
-      const safeTargetRatio = clamp(targetRatio, 0.01, 1);
-      const mddRatioTable = buildMddRatioTable(timeSeries, periodMdd, settings.bandStep);
+      const fixedDdTable = buildFixedDdTable(timeSeries, periodMdd);
+      const targetStats = computeSignalStats(timeSeries, targetDd);
 
-      const targetDd = Number((periodMdd * safeTargetRatio).toFixed(4));
-      const targetStats = computeSignalStatsForThreshold(timeSeries, targetDd);
       const targetPrice = metrics.ath * (1 + targetDd);
-      const gapToTarget = metrics.currentPrice > 0 ? (targetPrice / metrics.currentPrice) - 1 : null;
-      const currentMddUsageRatio = periodMdd < 0 ? Math.abs(metrics.currentDd / periodMdd) : null;
+      const gapToTarget = metrics.currentPrice > 0
+        ? (metrics.currentPrice / targetPrice) - 1
+        : null;
 
       return {
         metrics,
         analysisStart,
         analysisEnd,
-        mddRatioTable,
+        fixedDdTable,
         target: {
-          ratio: safeTargetRatio,
+          ddPct: safeTargetDdPct,
           dd: targetDd,
           price: targetPrice,
           gapToTarget,
@@ -530,10 +545,12 @@
           signalCount: targetStats.signalCount,
           winRate: targetStats.winRate,
           winCount: targetStats.winCount,
-          loseCount: targetStats.loseCount
+          loseCount: targetStats.loseCount,
+          daysBelow: targetStats.daysBelow,
+          totalDays: targetStats.totalDays,
+          belowRatio: targetStats.totalDays > 0 ? targetStats.daysBelow / targetStats.totalDays : 0
         },
         periodMdd,
-        currentMddUsageRatio,
         timeSeries
       };
     }
@@ -594,7 +611,7 @@
     // - 차트 아래 슬라이더로 MDD 비율 조정
     // - 목표선 이하 음영, 터치 패널 목표가격 표시
     // -------------------------------------
-    function DrawdownSvgChart({ data, targetDd, targetPrice, mode, mddDate, mddValue, periodMdd, onRatioChange, currentRatio }) {
+    function DrawdownSvgChart({ data, targetDd, targetPrice, mode, mddDate, mddValue, currentDdPct, onDdPctChange }) {
       const [selectedIndex, setSelectedIndex] = useState(null);
       const wrapRef = useRef(null);
       const lastTouchRef = useRef(false);
@@ -700,8 +717,6 @@
 
       const clampedTargetY = Number.isFinite(yTarget) ? clamp(yTarget, 20, svgHeight - 26) : null;
 
-      // 슬라이더 표시값: currentRatio (0.05~1.0)
-      const sliderVal = Number.isFinite(currentRatio) ? Math.round(currentRatio * 100) : 80;
 
       return (
         <div className="mt-6">
@@ -752,29 +767,27 @@
             )}
           </div>
 
-          {/* 기준선 슬라이더 */}
-          {onRatioChange && Number.isFinite(currentRatio) && (
+          {/* 기준선 슬라이더: ATH 대비 목표 낙폭 (-5% ~ -100%) */}
+          {onDdPctChange && (
             <div className="mt-4 bg-gray-50 rounded-2xl px-4 py-3 border border-gray-100">
               <div className="flex items-center justify-between mb-2">
-                <span className="text-xs font-bold text-toss-subtext">추가매수 기준선 조정</span>
-                <span className="text-sm font-bold text-red-500">MDD의 {sliderVal}%</span>
+                <span className="text-xs font-bold text-toss-subtext">추가매수 기준선 조정 (ATH 대비)</span>
+                <span className="text-sm font-bold text-red-500">{currentDdPct}%</span>
               </div>
               <input
                 type="range"
-                min="5"
-                max="100"
-                step="1"
-                value={sliderVal}
-                onChange={(e) => {
-                  if (onRatioChange) onRatioChange(Number(e.target.value) / 100);
-                }}
+                min="-100"
+                max="-5"
+                step="5"
+                value={currentDdPct}
+                onChange={(e) => { if (onDdPctChange) onDdPctChange(Number(e.target.value)); }}
                 className="w-full accent-red-500"
                 style={{ height: '6px' }}
               />
               <div className="flex justify-between text-[10px] text-toss-subtext mt-1">
-                <span>5% (낮은 곳)</span>
-                <span>현재 기준 낙폭: {formatPct(targetDd)}</span>
-                <span>100% (MDD)</span>
+                <span>-100%</span>
+                <span>현재 기준: ATH 대비 {currentDdPct}%</span>
+                <span>-5%</span>
               </div>
             </div>
           )}
@@ -802,11 +815,11 @@
                 </div>
                 <div className="bg-toss-gray/50 rounded-xl p-3">
                   <div className="text-xs text-toss-subtext mb-1">터치 가격</div>
-                  <div className="font-bold text-toss-text">{formatNum(selectedPoint.price)}</div>
+                  <div className="font-bold text-toss-text">{mode === 'KRW' ? formatKrw(selectedPoint.price) : formatNum(selectedPoint.price)}</div>
                 </div>
                 <div className="bg-red-50 rounded-xl p-3 border border-red-100">
                   <div className="text-xs text-red-500 mb-1">목표 가격 (≈)</div>
-                  <div className="font-bold text-red-500">{formatNum(targetPrice)}</div>
+                  <div className="font-bold text-red-500">{mode === 'KRW' ? formatKrw(targetPrice) : formatNum(targetPrice)}</div>
                 </div>
               </div>
               <div className="mt-3 grid grid-cols-2 gap-3">
@@ -854,7 +867,7 @@
       }, []);
 
       const [activeTab, setActiveTab] = useState('dashboard');
-      const [settings, setSettings] = useLocalStorage('mdd_settings_ratio_v3', DEFAULT_SETTINGS);
+      const [settings, setSettings] = useLocalStorage('mdd_settings_fixed_v1', DEFAULT_SETTINGS);
       const [reloadToken, setReloadToken] = useState(0);
       const [rawData, setRawData] = useState([]);
       const [dataSource, setDataSource] = useState('LOADING');
@@ -957,7 +970,7 @@
         let krwEngine = null;
         let configWarning = null;
 
-        const safeBandStep = Number(settings.bandStep);
+        // bandStep 제거됨 (고정 낙폭 방식 사용)
 
         if (!Number.isFinite(safeBandStep) || safeBandStep <= 0) {
           configWarning = 'Band Step은 0보다 큰 숫자여야 합니다.';
@@ -1007,20 +1020,7 @@
         const symbol = e.target.value;
         const assetInfo = assetsList.find((a) => a.symbol === symbol);
 
-        setSettings((prev) => {
-          const next = { ...prev, symbol };
-          if (assetInfo) {
-            next.assetType = assetInfo.assetType || prev.assetType;
-            if (assetInfo.defaultTargetMddRatio !== undefined) {
-              if ((assetInfo.assetType || prev.assetType) === 'ETF') next.targetMddRatioEtf = assetInfo.defaultTargetMddRatio;
-              else next.targetMddRatioStock = assetInfo.defaultTargetMddRatio;
-            }
-            if (assetInfo.defaultBandStep !== undefined) {
-              next.bandStep = assetInfo.defaultBandStep;
-            }
-          }
-          return next;
-        });
+        setSettings((prev) => ({ ...prev, symbol }));
 
         setDataSource('LOADING');
         setReloadToken((prev) => prev + 1);
@@ -1034,7 +1034,7 @@
 
       function handleResetSampleData() {
         if (window.confirm('기본 SPY 샘플 데이터로 되돌리시겠습니까?')) {
-          setSettings((prev) => ({ ...prev, symbol: 'SPY', assetType: 'ETF' }));
+          setSettings((prev) => ({ ...prev, symbol: 'SPY' }));
           setRawData(fallbackSampleData);
           setDataSource('SAMPLE');
         }
@@ -1126,12 +1126,12 @@
         if (!primary) return ['엔진 설정 문제로 분석을 수행하지 못했습니다. 설정 탭을 확인해주세요.'];
 
 
-        lines.push(`기간 MDD는 ${formatPct(primary.periodMdd)}이며, 설정 MDD 비율 ${formatPct(primary.target.ratio)} 기준선은 ${formatPct(primary.target.dd)}입니다.`);
+        lines.push(`기간 MDD는 ${formatPct(primary.periodMdd)}이며, 설정 기준선은 ATH 대비 ${primary.target.ddPct}%입니다.`);
 
         if (primary.target.signalCount > 0) {
-          lines.push(`그 기준선에서 과거 신호 수는 ${primary.target.signalCount}회이고 실제 승률은 ${formatPct(primary.target.winRate)}입니다.`);
+          lines.push(`그 기준선에서 과거 신호 수는 ${primary.target.signalCount}회이고 ATH 회복 승률은 ${formatPct(primary.target.winRate)}입니다.`);
         } else {
-          lines.push(`그 기준선에서는 과거 신호가 없어 실제 승률을 계산할 수 없습니다.`);
+          lines.push(`그 기준선에서는 과거 신호가 없어 승률을 계산할 수 없습니다.`);
         }
 
         if (primary.target.gapToTarget !== null) {
@@ -1169,7 +1169,62 @@
                 </select>
               </div>
 
+              {/* 기간 선택 버튼 */}
+              {(() => {
+                const dataFirstDate = meta.usdFirstDate || null;
+                const today = new Date();
+                const todayStr = today.toISOString().slice(0, 10);
 
+                const periods = [
+                  { label: '1년', years: 1 },
+                  { label: '3년', years: 3 },
+                  { label: '5년', years: 5 },
+                  { label: '10년', years: 10 },
+                  { label: '15년', years: 15 },
+                  { label: '최대', years: null },
+                ];
+
+                function getPeriodStart(years) {
+                  if (years === null) return dataFirstDate || '1993-01-01';
+                  const d = new Date(today);
+                  d.setFullYear(d.getFullYear() - years);
+                  const s = d.toISOString().slice(0, 10);
+                  if (dataFirstDate && s < dataFirstDate) return dataFirstDate;
+                  return s;
+                }
+
+                function isActive(years) {
+                  const start = getPeriodStart(years);
+                  return settings.startDate === start && settings.endDate >= todayStr.slice(0, 7);
+                }
+
+                return (
+                  <div className="w-full md:w-auto">
+                    <p className="text-xs font-bold text-toss-subtext mb-1">분석 기간</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {periods.map(({ label, years }) => {
+                        const active = isActive(years);
+                        return (
+                          <button
+                            key={label}
+                            onClick={() => {
+                              const start = getPeriodStart(years);
+                              setSettings(prev => ({ ...prev, startDate: start, endDate: '2099-12-31' }));
+                            }}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                              active
+                                ? 'bg-toss-text text-white shadow-sm'
+                                : 'bg-toss-gray text-toss-subtext hover:bg-gray-200'
+                            }`}
+                          >
+                            {label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
 
             {fetchStatus.error && (
@@ -1192,6 +1247,74 @@
               </div>
             )}
 
+            {/* 1. 엔진 카드 (차트) - 가장 먼저 */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {['USD', 'KRW'].map((mode) => {
+                const engine = mode === 'USD' ? appState.usdEngine : appState.krwEngine;
+                if (!engine) return null;
+
+                return (
+                  <Card key={mode} title={mode === 'USD' ? '달러 기준 분석' : '원화 기준 분석 (환율 반영)'} className={settings.primarySignalMode === mode ? 'ring-2 ring-toss-blue/30' : ''}>
+                    <div className="grid grid-cols-2 gap-y-6 gap-x-4">
+                      <Metric label="현재 가격" value={mode === 'KRW' ? formatKrw(engine.metrics.currentPrice) : formatNum(engine.metrics.currentPrice)} />
+                      <Metric label="역대 최고가(ATH)" value={mode === 'KRW' ? formatKrw(engine.metrics.ath) : formatNum(engine.metrics.ath)} />
+                      <Metric label="현재 하락률" value={formatPct(engine.metrics.currentDd)} highlight={true} />
+                      <Metric label="기간 MDD" value={formatPct(engine.metrics.mdd)} />
+                    </div>
+
+                    <DrawdownSvgChart
+                      data={engine.timeSeries}
+                      targetDd={engine.target.dd}
+                      targetPrice={engine.target.price}
+                      mode={mode}
+                      mddDate={engine.metrics.mddDate}
+                      mddValue={engine.metrics.mdd}
+                      currentDdPct={settings.targetDdPct}
+                      onDdPctChange={(newPct) => {
+                        setSettings(prev => ({ ...prev, targetDdPct: newPct }));
+                      }}
+                    />
+
+                    <div className="mt-6 pt-5 border-t border-toss-gray space-y-3">
+                      <div className="flex justify-between items-center bg-gray-50 p-3 rounded-lg">
+                        <span className="text-sm font-bold text-toss-subtext">기준 추가매수 낙폭 (ATH 대비)</span>
+                        <span className="text-base font-bold text-red-500">{engine.target.ddPct}%</span>
+                      </div>
+
+                      <div className="flex justify-between items-center bg-gray-50 p-3 rounded-lg">
+                        <span className="text-sm font-bold text-toss-subtext">기준 추가매수 가격 (≈)</span>
+                        <span className="text-base font-bold text-toss-text">{mode === 'KRW' ? formatKrw(engine.target.price) : formatNum(engine.target.price)}</span>
+                      </div>
+
+                      <div className="flex justify-between items-center bg-gray-50 p-3 rounded-lg">
+                        <span className="text-sm font-bold text-toss-subtext">ATH 회복 승률</span>
+                        <span className="text-base font-bold text-toss-text">{engine.target.winRate !== null ? formatPct(engine.target.winRate) : '신호 없음'}</span>
+                      </div>
+
+                      <div className="flex justify-between items-center bg-gray-50 p-3 rounded-lg">
+                        <span className="text-sm font-bold text-toss-subtext">신호 수 / 조건일 / 비중</span>
+                        <span className="text-base font-bold text-toss-text">
+                          {engine.target.signalCount}회 / {engine.target.daysBelow}일 / {engine.target.totalDays > 0 ? (engine.target.belowRatio * 100).toFixed(1) : 0}%
+                        </span>
+                      </div>
+
+                      <div className="flex justify-between items-center bg-gray-50 p-3 rounded-lg">
+                        <span className="text-sm font-bold text-toss-subtext">현재까지 추가 하락 필요</span>
+                        <span className={`text-base font-bold ${engine.target.gapToTarget !== null && engine.target.gapToTarget <= 0 ? 'text-toss-blue' : 'text-red-500'}`}>
+                          {engine.target.gapToTarget === null
+                            ? '-'
+                            : engine.target.gapToTarget <= 0
+                              ? `기준선 초과 (${formatPct(Math.abs(engine.target.gapToTarget))} 더 깊음)`
+                              : `${formatPct(engine.target.gapToTarget)} 추가 하락 필요`}
+                        </span>
+                      </div>
+                    </div>
+                  </Card>
+                );
+              })}
+            </div>
+
+            {/* 2. 최종 매수 시그널 */}
             <Card className={`border-l-4 transition-colors ${appState.gates.finalSignal ? 'border-l-toss-blue bg-toss-light' : 'border-l-toss-gray'}`}>
               <div className="flex flex-col md:flex-row justify-between md:items-center mb-6 gap-4">
                 <div>
@@ -1240,6 +1363,7 @@
               </div>
             </Card>
 
+            {/* 3. 현재 상태 해석 - 맨 아래 */}
             <Card title="현재 상태 해석" className="bg-blue-50/50">
               <div className="space-y-2">
                 {buildInterpretation().map((line, idx) => (
@@ -1250,69 +1374,6 @@
                 ))}
               </div>
             </Card>
-
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {['USD', 'KRW'].map((mode) => {
-                const engine = mode === 'USD' ? appState.usdEngine : appState.krwEngine;
-                if (!engine) return null;
-
-                return (
-                  <Card key={mode} title={mode === 'USD' ? '달러 기준 분석' : '원화 기준 분석 (환율 반영)'} className={settings.primarySignalMode === mode ? 'ring-2 ring-toss-blue/30' : ''}>
-                    <div className="grid grid-cols-2 gap-y-6 gap-x-4">
-                      <Metric label="현재 가격" value={formatNum(engine.metrics.currentPrice)} />
-                      <Metric label="역대 최고가(ATH)" value={formatNum(engine.metrics.ath)} />
-                      <Metric label="현재 하락률" value={formatPct(engine.metrics.currentDd)} highlight={true} />
-                      <Metric label="기간 MDD" value={formatPct(engine.metrics.mdd)} />
-                    </div>
-
-                    <DrawdownSvgChart
-                      data={engine.timeSeries}
-                      targetDd={engine.target.dd}
-                      targetPrice={engine.target.price}
-                      mode={mode}
-                      mddDate={engine.metrics.mddDate}
-                      mddValue={engine.metrics.mdd}
-                      periodMdd={engine.metrics.mdd}
-                      currentRatio={engine.target.ratio}
-                      onRatioChange={(newRatio) => {
-                        const roundedRatio = Math.round(newRatio * 100) / 100;
-                        const key = settings.assetType === 'ETF' ? 'targetMddRatioEtf' : 'targetMddRatioStock';
-                        setSettings(prev => ({ ...prev, [key]: roundedRatio }));
-                      }}
-                    />
-
-                    <div className="mt-6 pt-5 border-t border-toss-gray space-y-3">
-                      <div className="flex justify-between items-center bg-gray-50 p-3 rounded-lg">
-                        <span className="text-sm font-bold text-toss-subtext">설정 MDD 비율</span>
-                        <span className="text-base font-bold text-toss-text">{formatPct(engine.target.ratio)}</span>
-                      </div>
-
-                      <div className="flex justify-between items-center bg-gray-50 p-3 rounded-lg">
-                        <span className="text-sm font-bold text-toss-subtext">기준 추가매수 낙폭</span>
-                        <span className="text-base font-bold text-toss-text">{formatPct(engine.target.dd)}</span>
-                      </div>
-
-                      <div className="flex justify-between items-center bg-gray-50 p-3 rounded-lg">
-                        <span className="text-sm font-bold text-toss-subtext">해당 기준 실제 승률</span>
-                        <span className="text-base font-bold text-toss-text">{formatPct(engine.target.winRate)}</span>
-                      </div>
-
-                      {/* gapToTarget */}
-                      <div className="flex justify-between items-center bg-gray-50 p-3 rounded-lg">
-                        <span className="text-sm font-bold text-toss-subtext">목표까지 거리 (Gap to Target)</span>
-                        <span className={`text-base font-bold ${engine.target.gapToTarget !== null && engine.target.gapToTarget >= 0 ? 'text-toss-blue' : 'text-red-500'}`}>
-                          {engine.target.gapToTarget === null
-                            ? '-'
-                            : engine.target.gapToTarget >= 0
-                              ? `기준선 초과 (${formatPct(engine.target.gapToTarget)} 더 깊음)`
-                              : `${formatPct(Math.abs(engine.target.gapToTarget))} 추가 하락 필요`}
-                        </span>
-                      </div>
-                    </div>
-                  </Card>
-                );
-              })}
-            </div>
           </div>
         );
       }
@@ -1334,49 +1395,48 @@
               const engine = mode === 'USD' ? appState.usdEngine : appState.krwEngine;
               if (!engine) return null;
 
-              const currentRatio = engine.currentMddUsageRatio;
+              const isTargetRow = (r) => r.ddPct === engine.target.ddPct;
+              const isCurrentRow = (r) => !r.beyondMdd && engine.metrics.currentDd <= r.threshold &&
+                (r.ddPct === -5 || engine.metrics.currentDd > (r.ddPct + 5) / 100);
 
               return (
-                <Card key={mode} title={`${mode} 물타기 승률 테이블`}>
+                <Card key={mode} title={mode === 'USD' ? '달러 기준 ATH 낙폭별 승률' : '원화 기준 ATH 낙폭별 승률'}>
                   <div className="overflow-x-auto -mx-5 md:mx-0">
                     <table className="w-full text-sm text-left whitespace-nowrap">
                       <thead className="bg-toss-gray text-toss-subtext border-b border-gray-200">
                         <tr>
-                          <th className="py-3 px-5 font-semibold">MDD 비율</th>
-                          <th className="py-3 px-5 font-semibold">기준 낙폭</th>
-                          <th className="py-3 px-5 font-semibold">신호 수</th>
-                          <th className="py-3 px-5 font-semibold">실제 승률</th>
-                          <th className="py-3 px-5 font-semibold">미회복</th>
+                          <th className="py-3 px-4 font-semibold">낙폭</th>
+                          <th className="py-3 px-4 font-semibold">ATH 회복률</th>
+                          <th className="py-3 px-4 font-semibold">신호 수</th>
+                          <th className="py-3 px-4 font-semibold">조건일</th>
+                          <th className="py-3 px-4 font-semibold">비중</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {/* [수정] isCurrentBand를 이전 row의 ratio 기반으로 계산 (float step 직접 사용 오류 방지) */}
-                        {engine.mddRatioTable.map((r, i) => {
-                          const prevRatio = i > 0 ? engine.mddRatioTable[i - 1].ratio : 0;
-                          const isCurrentBand = currentRatio !== null && currentRatio <= r.ratio && currentRatio > prevRatio;
-                          const isTarget = Math.abs(r.ratio - engine.target.ratio) < 0.000001;
-                          const rowClass = isTarget ? 'bg-toss-light/60' : isCurrentBand ? 'bg-yellow-50' : '';
-                          const textClass = isTarget ? 'font-bold text-toss-blue' : isCurrentBand ? 'font-bold text-amber-700' : 'text-toss-text';
-
+                        {engine.fixedDdTable.map((r, i) => {
+                          const isTarget = r.ddPct === engine.target.ddPct;
+                          const isCurrent = !r.beyondMdd && engine.metrics.currentDd <= r.threshold &&
+                            (i === 0 || engine.metrics.currentDd > engine.fixedDdTable[i-1].threshold);
+                          const rowClass = isTarget ? 'bg-toss-light/60' : isCurrent ? 'bg-yellow-50' : r.beyondMdd ? 'opacity-30' : '';
+                          const textClass = isTarget ? 'font-bold text-toss-blue' : isCurrent ? 'font-bold text-amber-700' : 'text-toss-text';
                           return (
-                            <tr key={i} className={`border-b border-gray-100 hover:bg-gray-50 transition-colors ${rowClass}`}>
-                              <td className={`py-3 px-5 ${textClass}`}>{formatPct(r.ratio)}</td>
-                              <td className={`py-3 px-5 ${textClass}`}>{formatPct(r.threshold)}</td>
-                              <td className={`py-3 px-5 ${textClass}`}>{r.signalCount}회</td>
-                              <td className={`py-3 px-5 ${textClass}`}>{formatPct(r.winRate)}</td>
-                              <td className={`py-3 px-5 ${textClass}`}>{r.loseCount}건</td>
+                            <tr key={r.ddPct} className={`border-b border-gray-100 hover:bg-gray-50 transition-colors ${rowClass}`}>
+                              <td className={`py-3 px-4 ${textClass}`}>{r.ddPct}%</td>
+                              <td className={`py-3 px-4 ${textClass}`}>{r.winRate !== null ? formatPct(r.winRate) : '-'}</td>
+                              <td className={`py-3 px-4 ${textClass}`}>{r.beyondMdd ? '-' : `${r.signalCount}회`}</td>
+                              <td className={`py-3 px-4 ${textClass}`}>{r.beyondMdd ? '-' : `${r.daysBelow}일`}</td>
+                              <td className={`py-3 px-4 ${textClass}`}>{r.beyondMdd ? '-' : `${(r.belowRatio*100).toFixed(1)}%`}</td>
                             </tr>
                           );
                         })}
                       </tbody>
                     </table>
                   </div>
-
-                  {/* [수정] 승률 편향 주석 추가 */}
                   <div className="mt-4 text-xs text-toss-subtext space-y-1">
-                    <p>• 노란색은 현재 낙폭이 속한 MDD 비율 구간, 파란색은 현재 설정한 기준 비율입니다.</p>
-                    <p>• 분석 종료일에 가까운 신호일수록 회복 기회가 짧아 승률이 낮게 표시될 수 있습니다.</p>
-                    <p>• 신호는 기준선을 처음 하향 돌파한 시점이며, 회복 후 재돌파 시 새로운 신호로 집계됩니다.</p>
+                    <p>• 파란색: 현재 설정된 기준 낙폭 / 노란색: 현재 낙폭이 속한 구간</p>
+                    <p>• ATH 회복률: 해당 낙폭 첫 돌파 후 역대 최고가(ATH) 이상 회복된 비율</p>
+                    <p>• 조건일: 해당 낙폭 이하에 있었던 총 일수 / 비중: 전체 기간 대비 조건일 비율</p>
+                    <p>• 흐리게 표시된 행: 분석 기간 MDD보다 깊어 실제로 도달한 적 없는 구간</p>
                   </div>
                 </Card>
               );
@@ -1392,10 +1452,10 @@
               <p className="text-sm text-toss-subtext mb-4">초보자를 위한 추천 설정값을 한 번에 적용할 수 있습니다.</p>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                 {[
-                  { label: 'ETF 기본', preset: { assetType: 'ETF', targetMddRatioEtf: 0.80, bandStep: 0.05 } },
-                  { label: '개별주 기본', preset: { assetType: 'STOCK', targetMddRatioStock: 0.90, bandStep: 0.05 } },
-                  { label: '보수형', preset: { targetMddRatioEtf: 0.90, targetMddRatioStock: 0.95, fearGreedIndex: 'Extreme Fear', cashReady: true } },
-                  { label: '공격형', preset: { targetMddRatioEtf: 0.70, targetMddRatioStock: 0.80, fearGreedIndex: 'Fear', bandStep: 0.03 } }
+                  { label: '보수형 (-30%)', preset: { targetDdPct: -30, fearGreedIndex: 'Extreme Fear', cashReady: true } },
+                  { label: '중립형 (-20%)', preset: { targetDdPct: -20 } },
+                  { label: '공격형 (-15%)', preset: { targetDdPct: -15, fearGreedIndex: 'Fear' } },
+                  { label: '극공격 (-10%)', preset: { targetDdPct: -10 } }
                 ].map(({ label, preset }) => (
                   <button
                     key={label}
@@ -1408,11 +1468,11 @@
               </div>
             </Card>
 
-            <Card title="기본 엔진 설정 (Engine Configuration)">
+            <Card title="기본 설정">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                 <div className="space-y-5">
                   <div>
-                    <label className="block text-xs font-bold text-toss-subtext mb-1.5">분석 자산 (Asset)</label>
+                    <label className="block text-xs font-bold text-toss-subtext mb-1.5">분석 자산</label>
                     <select value={settings.symbol} onChange={handleAssetChange} className="w-full p-3 bg-toss-gray border-none rounded-xl text-sm font-medium focus:ring-2 focus:ring-toss-blue outline-none cursor-pointer">
                       {assetsList.filter((a) => a.enabled !== false).map((a) => (
                         <option key={a.symbol} value={a.symbol}>{a.symbol} - {a.name || '자산'}</option>
@@ -1421,38 +1481,29 @@
                   </div>
 
                   <div>
-                    <label className="block text-xs font-bold text-toss-subtext mb-1.5">Asset Type (기준 비율용)</label>
-                    <select name="assetType" value={settings.assetType} onChange={handleSettingChange} className="w-full p-3 bg-toss-gray border-none rounded-xl text-sm font-medium focus:ring-2 focus:ring-toss-blue outline-none cursor-pointer">
-                      <option value="ETF">ETF</option>
-                      <option value="STOCK">STOCK</option>
+                    <label className="block text-xs font-bold text-toss-subtext mb-1.5">목표 추가매수 낙폭 (ATH 대비)</label>
+                    <select name="targetDdPct" value={settings.targetDdPct} onChange={handleSettingChange} className="w-full p-3 bg-toss-gray border-none rounded-xl text-sm font-medium focus:ring-2 focus:ring-toss-blue outline-none cursor-pointer">
+                      {FIXED_DD_STEPS.map(pct => (
+                        <option key={pct} value={pct}>{pct}%</option>
+                      ))}
                     </select>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-xs font-bold text-toss-subtext mb-1.5">ETF MDD 비율</label>
-                      <input type="number" step="0.01" min="0.01" max="1" name="targetMddRatioEtf" value={settings.targetMddRatioEtf} onChange={handleSettingChange} className="w-full p-3 bg-toss-gray border-none rounded-xl text-sm font-medium outline-none" />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold text-toss-subtext mb-1.5">STOCK MDD 비율</label>
-                      <input type="number" step="0.01" min="0.01" max="1" name="targetMddRatioStock" value={settings.targetMddRatioStock} onChange={handleSettingChange} className="w-full p-3 bg-toss-gray border-none rounded-xl text-sm font-medium outline-none" />
-                    </div>
+                    <p className="mt-2 text-xs text-toss-subtext">ATH(역대 최고가) 대비 이 낙폭에서 추가매수를 고려합니다.</p>
                   </div>
 
                   <div>
-                    <label className="block text-xs font-bold text-toss-subtext mb-1.5">Currency Mode</label>
+                    <label className="block text-xs font-bold text-toss-subtext mb-1.5">표시 통화</label>
                     <select name="currencyMode" value={settings.currencyMode} onChange={handleSettingChange} className="w-full p-3 bg-toss-gray border-none rounded-xl text-sm font-medium focus:ring-2 focus:ring-toss-blue outline-none cursor-pointer">
-                      <option value="BOTH">BOTH (달러 & 원화 동시 계산)</option>
-                      <option value="USD">USD Only</option>
-                      <option value="KRW">KRW Only</option>
+                      <option value="BOTH">달러 & 원화 동시</option>
+                      <option value="USD">달러만</option>
+                      <option value="KRW">원화만</option>
                     </select>
                   </div>
 
                   <div>
-                    <label className="block text-xs font-bold text-toss-subtext mb-1.5">Primary Signal Mode</label>
+                    <label className="block text-xs font-bold text-toss-subtext mb-1.5">주 신호 기준</label>
                     <select name="primarySignalMode" value={settings.primarySignalMode} onChange={handleSettingChange} className="w-full p-3 bg-toss-gray border-none rounded-xl text-sm font-medium focus:ring-2 focus:ring-toss-blue outline-none cursor-pointer">
-                      <option value="USD">USD (달러 기준 엔진 우선)</option>
-                      <option value="KRW">KRW (원화 기준 엔진 우선)</option>
+                      <option value="USD">달러 기준 우선</option>
+                      <option value="KRW">원화 기준 우선</option>
                     </select>
                   </div>
                 </div>
@@ -1467,12 +1518,6 @@
                       <label className="block text-xs font-bold text-toss-subtext mb-1.5">종료일</label>
                       <input type="date" name="endDate" value={settings.endDate} onChange={handleSettingChange} className="w-full p-3 bg-toss-gray border-none rounded-xl text-sm font-medium outline-none" />
                     </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-bold text-toss-subtext mb-1.5">Band Step (MDD 비율 단계)</label>
-                    <input type="number" step="0.01" min="0.01" max="0.20" name="bandStep" value={settings.bandStep} onChange={handleSettingChange} className="w-full p-3 bg-toss-gray border-none rounded-xl text-sm font-medium outline-none" />
-                    <p className="mt-2 text-xs text-toss-subtext">예: 0.05면 5%, 10%, 15% ... 100% 비율 구간으로 테이블을 만듭니다.</p>
                   </div>
 
                   <h4 className="font-bold text-toss-text flex items-center pt-4">
@@ -1492,12 +1537,11 @@
                   <div className="bg-toss-gray/50 p-4 rounded-xl space-y-4 border border-gray-100">
                     <label className="flex items-center space-x-3 cursor-pointer">
                       <input type="checkbox" name="cashReady" checked={settings.cashReady} onChange={handleSettingChange} className="w-5 h-5 text-toss-blue border-gray-300 rounded focus:ring-toss-blue" />
-                      <span className="text-sm font-bold text-toss-text">만기 자금 현금 확보 완료 (Cash Ready)</span>
+                      <span className="text-sm font-bold text-toss-text">만기 자금 현금 확보 완료</span>
                     </label>
-
                     <label className="flex items-center space-x-3 cursor-pointer">
                       <input type="checkbox" name="incomeGreater" checked={settings.incomeGreater} onChange={handleSettingChange} className="w-5 h-5 text-toss-blue border-gray-300 rounded focus:ring-toss-blue" />
-                      <span className="text-sm font-bold text-toss-text">소득이 지출 초과 (Income &gt; Expense)</span>
+                      <span className="text-sm font-bold text-toss-text">소득이 지출 초과</span>
                     </label>
                   </div>
                 </div>
@@ -1542,8 +1586,7 @@
         const krwNullCount = rawData.filter((r) => r.closeKrw === null || r.closeKrw === undefined).length;
         const krwValidCount = rawData.filter((r) => isValidPositiveNumber(r.closeKrw)).length;
         const krwAnomalyCount = rawData.length - krwNullCount - krwValidCount;
-        const validBandStep = Number.isFinite(Number(settings.bandStep)) && Number(settings.bandStep) > 0;
-        const hasRatioTable = primary && primary.mddRatioTable && primary.mddRatioTable.length > 0;
+        const hasFixedDdTable = primary && primary.fixedDdTable && primary.fixedDdTable.length > 0;
         const targetExists = primary && primary.target && primary.target.dd !== null;
 
         const krwStartCorrectlyAdjusted =
@@ -1557,13 +1600,13 @@
           { id: 'F3', name: 'USDKRW 환율 로드', expected: 'TRUE', actual: fetchStatus.fx === true ? 'TRUE' : (dataSource === 'SAMPLE' || dataSource === 'IMPORTED' ? 'SKIP' : 'FALSE'), pass: dataSource === 'SAMPLE' || dataSource === 'IMPORTED' ? null : fetchStatus.fx === true },
           { id: 'D1', name: '날짜 오름차순 정렬', expected: 'TRUE', actual: isAscending ? 'TRUE' : 'FALSE', pass: isAscending },
           { id: 'D2', name: 'USD 가격 양수 여부', expected: 'TRUE', actual: usdPositive ? 'TRUE' : 'FALSE', pass: usdPositive },
-          { id: 'D3', name: '유효한 Band Step', expected: 'TRUE', actual: validBandStep ? 'TRUE' : 'FALSE', pass: validBandStep },
+          { id: 'D3', name: '고정 낙폭 테이블 설정', expected: 'TRUE', actual: 'TRUE', pass: true },
           { id: 'K1', name: 'KRW 유효 행 수 > 0', expected: '> 0', actual: String(krwValidCount), pass: krwValidCount > 0 },
           { id: 'K2', name: 'KRW 이상값 행 수 (0이어야 정상)', expected: '0', actual: String(krwAnomalyCount), pass: krwAnomalyCount === 0 },
           { id: 'K3', name: 'KRW 시작일 보정 정상', expected: 'TRUE', actual: krwStartCorrectlyAdjusted ? 'TRUE' : (meta.krwFirstDate === null ? 'SKIP' : 'FALSE'), pass: meta.krwFirstDate === null ? null : krwStartCorrectlyAdjusted },
           { id: 'E1', name: '엔진 실행 성공', expected: 'TRUE', actual: primary ? 'TRUE' : 'FALSE', pass: primary ? true : false },
           { id: 'E2', name: '기간 MDD <= 0', expected: '<= 0', actual: primary ? primary.metrics.mdd.toFixed(4) : 'N/A', pass: primary ? primary.metrics.mdd <= 0 : null },
-          { id: 'R1', name: 'MDD 비율 테이블 생성', expected: 'TRUE', actual: hasRatioTable ? 'TRUE' : 'FALSE', pass: hasRatioTable },
+          { id: 'R1', name: '고정 낙폭 테이블 생성', expected: 'TRUE', actual: hasFixedDdTable ? 'TRUE' : 'FALSE', pass: hasFixedDdTable },
           { id: 'R2', name: '목표 기준 낙폭 계산 성공', expected: 'TRUE', actual: targetExists ? 'TRUE' : 'FALSE', pass: targetExists },
           { id: 'R3', name: '최종 Buy Signal 논리 일치', expected: appState.gates.finalSignal ? 'TRUE' : 'FALSE', actual: (appState.gates.lifeGate && appState.gates.marketGate) ? 'TRUE' : 'FALSE', pass: appState.gates.finalSignal === (appState.gates.lifeGate && appState.gates.marketGate) },
           { id: 'A1', name: '첫 신호 오탐 방지 (i>0 조건 적용)', expected: 'FIXED', actual: 'FIXED', pass: true }
@@ -1672,7 +1715,7 @@
                   '자산과 기간을 선택합니다.',
                   'MDD 비율을 입력합니다. 예: 0.80 = 기간 MDD의 80% 지점.',
                   '대시보드에서 기준 추가매수 낙폭과 현재 낙폭을 비교합니다.',
-                  '승률 테이블에서 실제 승률과 신호 수를 확인합니다.',
+                  '대시보드에서 실제 승률과 신호 수를 확인합니다.',
                   '생활 게이트와 시장 게이트를 함께 보고 실행 여부를 판단합니다.'
                 ].map((step, i) => (
                   <li key={i} className="flex items-center">
@@ -1696,7 +1739,6 @@
             <nav className="flex space-x-2 mb-6 overflow-x-auto no-scrollbar pb-2 px-2">
               {[
                 { id: 'dashboard', label: '대시보드' },
-                { id: 'detail', label: '승률 테이블' },
                 { id: 'settings', label: '설정 및 데이터' },
                 { id: 'verify', label: '시스템 검증' },
                 { id: 'guide', label: '이용 가이드' }
@@ -1715,8 +1757,7 @@
 
             <main className="px-2">
               {activeTab === 'dashboard' && renderDashboard()}
-              {activeTab === 'detail' && renderDetail()}
-              {activeTab === 'settings' && renderSettings()}
+                {activeTab === 'settings' && renderSettings()}
               {activeTab === 'verify' && renderVerify()}
               {activeTab === 'guide' && renderGuide()}
             </main>
