@@ -970,11 +970,7 @@
         let krwEngine = null;
         let configWarning = null;
 
-        // bandStep 제거됨 (고정 낙폭 방식 사용)
-
-        if (!Number.isFinite(safeBandStep) || safeBandStep <= 0) {
-          configWarning = 'Band Step은 0보다 큰 숫자여야 합니다.';
-        } else if (dataSource !== 'LOADING') {
+        if (dataSource !== 'LOADING') {
           if (settings.currencyMode === 'USD' || settings.currencyMode === 'BOTH') {
             usdEngine = runEngine(rawData, 'closeUsd', meta.usdAnalysisStart, settings.endDate, settings);
           }
