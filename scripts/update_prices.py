@@ -96,7 +96,7 @@ def main():
     print("\n[FX]")
     fx_path = FX_DIR / "USDKRW.json"
     existing_fx = load_json(fx_path)
-    new_fx_rows = fetch_new_rows(FX_SYMBOL, last_date(existing_fx), field="close")
+    new_fx_rows = fetch_new_rows(FX_SYMBOL, last_date(existing_fx), field="rate")
 
     if new_fx_rows:
         updated_fx = existing_fx + new_fx_rows
