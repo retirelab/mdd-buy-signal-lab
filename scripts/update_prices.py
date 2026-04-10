@@ -62,7 +62,13 @@ def update_fear_greed():
     if existing and existing[-1]["date"] == today:
         print(f"  Fear & Greed: already up to date")
         return
-    headers = {"User-Agent": "Mozilla/5.0", "Referer": "https://edition.cnn.com/markets/fear-and-greed"}
+    headers = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Referer": "https://edition.cnn.com/markets/fear-and-greed",
+    "Origin": "https://edition.cnn.com"
+}
     try:
         res = requests.get(CNN_FG_URL, headers=headers, timeout=10)
         res.raise_for_status()
