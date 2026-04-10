@@ -74,7 +74,7 @@ def update_fear_greed():
         res.raise_for_status()
         fg = res.json()["fear_and_greed"]
         score = round(float(fg["score"]), 1)
-        rating = fg.get("rating", score_to_rating(score))
+        rating = fg.get("rating", score_to_rating(score)).title()
         entry = {"date": today, "score": score, "rating": rating}
         existing.append(entry)
         save_json(FG_PATH, existing)
