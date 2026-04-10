@@ -1334,22 +1334,6 @@
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="p-5 rounded-xl bg-white/50 border border-gray-100 flex flex-col justify-between">
-                  <h4 className="font-bold text-toss-text mb-4 flex items-center">
-                    <span className={`w-2.5 h-2.5 rounded-full mr-2 ${appState.gates.lifeGate ? 'bg-green-500' : 'bg-red-500'}`}></span>
-                    생활 게이트 (Life Gate)
-                  </h4>
-                  <div className="space-y-3 text-sm font-medium text-toss-text">
-                    <div className="flex justify-between items-center bg-gray-50/80 p-2.5 rounded-lg">
-                      <span>현금 분리 확보</span>
-                      <Badge active={settings.cashReady} color={settings.cashReady ? 'green' : 'red'}>{settings.cashReady ? 'PASS' : 'FAIL'}</Badge>
-                    </div>
-                    <div className="flex justify-between items-center bg-gray-50/80 p-2.5 rounded-lg">
-                      <span>소득 &gt; 지출 달성</span>
-                      <Badge active={settings.incomeGreater} color={settings.incomeGreater ? 'green' : 'red'}>{settings.incomeGreater ? 'PASS' : 'FAIL'}</Badge>
-                    </div>
-                  </div>
-                </div>
 
                 <div className="p-5 rounded-xl bg-white/50 border border-gray-100 flex flex-col justify-between">
                   <h4 className="font-bold text-toss-text mb-4 flex items-center">
@@ -1368,17 +1352,17 @@
                   </div>
                 </div>
               </div>
-            </Card>
 
-            {/* 3. 현재 상태 해석 - 맨 아래 */}
-            <Card title="현재 상태 해석" className="bg-blue-50/50">
-              <div className="space-y-2">
-                {buildInterpretation().map((line, idx) => (
-                  <p key={idx} className="text-sm font-medium text-toss-text flex items-start">
-                    <span className="mr-2 mt-0.5 text-toss-blue">•</span>
-                    <span>{line}</span>
-                  </p>
-                ))}
+              <div className="mt-6 pt-5 border-t border-gray-100">
+                <h4 className="font-bold text-toss-text mb-3">현재 상태 해석</h4>
+                <div className="space-y-2">
+                  {buildInterpretation().map((line, idx) => (
+                    <p key={idx} className="text-sm font-medium text-toss-text flex items-start">
+                      <span className="mr-2 mt-0.5 text-toss-blue">•</span>
+                      <span>{line}</span>
+                    </p>
+                  ))}
+                </div>
               </div>
             </Card>
           </div>
@@ -1525,31 +1509,6 @@
                       <label className="block text-xs font-bold text-toss-subtext mb-1.5">종료일</label>
                       <input type="date" name="endDate" value={settings.endDate} onChange={handleSettingChange} className="w-full p-3 bg-toss-gray border-none rounded-xl text-sm font-medium outline-none" />
                     </div>
-                  </div>
-
-                  <h4 className="font-bold text-toss-text flex items-center pt-4">
-                    <span className="w-1.5 h-4 bg-toss-blue rounded-full mr-2"></span>
-                    투자 게이트 (수동 조작)
-                  </h4>
-
-                  <div>
-                    <label className="block text-xs font-bold text-toss-subtext mb-1.5">현재 공포 탐욕 지수</label>
-                    <select name="fearGreedIndex" value={settings.fearGreedIndex} onChange={handleSettingChange} className="w-full p-3 bg-toss-gray border-none rounded-xl text-sm font-medium focus:ring-2 focus:ring-toss-blue outline-none cursor-pointer">
-                      <option value="Extreme Fear">Extreme Fear (극단적 공포)</option>
-                      <option value="Fear">Fear (공포)</option>
-                      <option value="Neutral">Neutral (중립 이상)</option>
-                    </select>
-                  </div>
-
-                  <div className="bg-toss-gray/50 p-4 rounded-xl space-y-4 border border-gray-100">
-                    <label className="flex items-center space-x-3 cursor-pointer">
-                      <input type="checkbox" name="cashReady" checked={settings.cashReady} onChange={handleSettingChange} className="w-5 h-5 text-toss-blue border-gray-300 rounded focus:ring-toss-blue" />
-                      <span className="text-sm font-bold text-toss-text">만기 자금 현금 확보 완료</span>
-                    </label>
-                    <label className="flex items-center space-x-3 cursor-pointer">
-                      <input type="checkbox" name="incomeGreater" checked={settings.incomeGreater} onChange={handleSettingChange} className="w-5 h-5 text-toss-blue border-gray-300 rounded focus:ring-toss-blue" />
-                      <span className="text-sm font-bold text-toss-text">소득이 지출 초과</span>
-                    </label>
                   </div>
                 </div>
               </div>
