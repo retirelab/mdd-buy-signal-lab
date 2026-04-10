@@ -876,8 +876,10 @@
         assets: null,
         price: null,
         fx: null,
+        fearGreed: null,
         error: null
       });
+      const [liveRating, setLiveRating] = useState(null);
       const [fallbackSampleData] = useState(() => generateSampleData('SPY'));
       const fileInputRef = useRef(null);
 
@@ -919,9 +921,10 @@
           };
 
           try {
-            const [priceRes, fxRes] = await Promise.all([
+            const [priceRes, fxRes, fgRes] = await Promise.all([
               fetch(`./data/prices/${settings.symbol}.json`).catch(() => null),
-              fetch('./data/fx/USDKRW.json').catch(() => null)
+              fetch('./data/fx/USDKRW.json').catch(() => null),
+              fetch('./data/fear_greed.json').catch(() => null)
             ]);
 
             if (!priceRes || !priceRes.ok) throw new Error(`${settings.symbol}.json 가격 파일을 불러오지 못했습니다.`);
@@ -929,6 +932,14 @@
 
             nextStatus.price = true;
             nextStatus.fx = true;
+
+            if (fgRes && fgRes.ok) {
+              const fgData = await fgRes.json();
+              if (Array.isArray(fgData) && fgData.length > 0) {
+                setLiveRating(fgData[fgData.length - 1]);
+                nextStatus.fearGreed = true;
+              }
+            }
 
             const priceData = await priceRes.json();
             const fxData = await fxRes.json();
@@ -990,7 +1001,7 @@
 
         const primaryEngine = settings.primarySignalMode === 'USD' ? usdEngine : krwEngine;
         const lifeGate = settings.cashReady && settings.incomeGreater;
-        const fearGate = settings.fearGreedIndex === 'Extreme Fear';
+        const fearGate = (liveRating ? liveRating.rating : settings.fearGreedIndex) === 'Extreme Fear';
         const ddGate = primaryEngine ? primaryEngine.target.isTriggered : false;
         const marketGate = fearGate && ddGate;
         const finalSignal = lifeGate && marketGate;
@@ -1348,7 +1359,7 @@
                   <div className="space-y-3 text-sm font-medium text-toss-text">
                     <div className="flex justify-between items-center bg-gray-50/80 p-2.5 rounded-lg">
                       <span>공포 지수 (Extreme)</span>
-                      <Badge active={appState.gates.fearGate} color={appState.gates.fearGate ? 'green' : 'red'}>{settings.fearGreedIndex}</Badge>
+                      <Badge active={appState.gates.fearGate} color={appState.gates.fearGate ? 'green' : 'red'}>{liveRating ? `${liveRating.rating} (${liveRating.score})` : settings.fearGreedIndex}</Badge>
                     </div>
                     <div className="flex justify-between items-center bg-gray-50/80 p-2.5 rounded-lg">
                       <span>기준 낙폭 도달 ({settings.primarySignalMode})</span>
