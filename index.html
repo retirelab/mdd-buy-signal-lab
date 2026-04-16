@@ -48,17 +48,33 @@
       theme: {
         extend: {
           colors: {
+            app: {
+              blue: '#3182F6',
+              blueLight: '#E8F3FF',
+              green: '#00C471',
+              greenLight: '#E6F8F0',
+              pink: '#FF477E',
+              pinkLight: '#FFF0F4',
+              yellow: '#FFD54F',
+              yellowLight: '#FFF8E1',
+              text: '#333D4B',
+              subtext: '#8B95A1',
+              bg: '#F9FAFB',
+              border: '#F2F4F6'
+            },
             toss: {
-              blue: '#3182f6',
-              light: '#e8f3ff',
+              blue: '#3182F6',
+              light: '#E8F3FF',
               dark: '#1b64da',
-              gray: '#f2f4f6',
-              text: '#333d4b',
-              subtext: '#8b95a1'
+              gray: '#F2F4F6',
+              text: '#333D4B',
+              subtext: '#8B95A1'
             }
           },
           boxShadow: {
-            card: '0 2px 10px rgba(0, 0, 0, 0.04)'
+            'card': '0 4px 20px rgba(0, 0, 0, 0.04)',
+            'float': '0 10px 25px rgba(49, 130, 246, 0.15)',
+            'btn': '0 2px 8px rgba(0, 0, 0, 0.05)'
           }
         }
       }
@@ -71,28 +87,66 @@
 
   <style>
     body {
-      background-color: #f9fafb;
+      background-color: #F9FAFB;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-      color: #333d4b;
+      color: #333D4B;
+      -webkit-font-smoothing: antialiased;
     }
-    .animate-fade-in { animation: fadeIn 0.3s ease-in-out; }
+
+    .animate-fade-in { animation: fadeIn 0.4s ease-out forwards; }
     @keyframes fadeIn {
-      from { opacity: 0; transform: translateY(5px); }
+      from { opacity: 0; transform: translateY(10px); }
       to { opacity: 1; transform: translateY(0); }
     }
+
+    .animate-soft-bounce { animation: softBounce 2s infinite cubic-bezier(0.45, 0, 0.55, 1); }
+    @keyframes softBounce {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(-8px); }
+    }
+
+    .animate-pop-in { animation: popIn 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; }
+    @keyframes popIn {
+      0% { opacity: 0; transform: scale(0.8); }
+      100% { opacity: 1; transform: scale(1); }
+    }
+
     .no-scrollbar::-webkit-scrollbar { display: none; }
     .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
     @keyframes spin { to { transform: rotate(360deg); } }
+
+    input[type="range"] {
+      -webkit-appearance: none;
+      appearance: none;
+      background: transparent;
+      cursor: pointer;
+    }
+    input[type="range"]::-webkit-slider-runnable-track {
+      background: #F2F4F6;
+      height: 8px;
+      border-radius: 4px;
+    }
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      height: 24px;
+      width: 24px;
+      background: #FF477E;
+      border: 4px solid #FFF;
+      border-radius: 50%;
+      margin-top: -8px;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+      transition: transform 0.1s;
+    }
+    input[type="range"]::-webkit-slider-thumb:hover {
+      transform: scale(1.1);
+    }
   </style>
 </head>
 <body>
   <div id="root">
-    <div style="display:flex; flex-direction:column; justify-content:center; align-items:center; height:100vh; color:#8b95a1;">
-      <svg style="animation: spin 1s linear infinite; width: 40px; height: 40px; color: #3182f6; margin-bottom: 16px;" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-        <circle style="opacity: 0.25;" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-        <path style="opacity: 0.75;" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-      </svg>
-      <p style="font-weight: 600;">엔진을 초기화하는 중입니다...</p>
+    <div style="display:flex; flex-direction:column; justify-content:center; align-items:center; height:100vh; color:#8B95A1;">
+      <div style="font-size: 2.5rem; margin-bottom: 1rem; animation: softBounce 2s infinite cubic-bezier(0.45, 0, 0.55, 1);">⏳</div>
+      <p style="font-weight: 700; font-size: 1.1rem;">데이터를 불러오고 있습니다...</p>
     </div>
   </div>
 
@@ -558,10 +612,10 @@
     // -------------------------------------
     function Card({ title, children, className = '', titleRight = null }) {
       return (
-        <div className={`bg-white rounded-2xl shadow-card p-5 md:p-6 mb-6 ${className}`}>
+        <div className={`bg-white rounded-3xl shadow-card p-6 md:p-8 mb-6 border border-app-border ${className}`}>
           {(title || titleRight) && (
-            <div className="flex justify-between items-center mb-5 gap-3">
-              {title ? <h3 className="text-lg font-bold text-toss-text">{title}</h3> : <div />}
+            <div className="flex justify-between items-center mb-6 gap-3">
+              {title ? <h3 className="text-lg md:text-xl font-bold text-app-text tracking-tight">{title}</h3> : <div />}
               {titleRight}
             </div>
           )}
@@ -573,8 +627,8 @@
     function Metric({ label, value, highlight }) {
       return (
         <div className="flex flex-col">
-          <span className="text-sm text-toss-subtext mb-1 font-medium">{label}</span>
-          <span className={`text-xl md:text-2xl font-bold tracking-tight ${highlight ? 'text-toss-blue' : 'text-toss-text'}`}>
+          <span className="text-sm text-app-subtext mb-1 font-medium">{label}</span>
+          <span className={`text-xl md:text-2xl font-bold tracking-tight ${highlight ? 'text-app-blue' : 'text-app-text'}`}>
             {value}
           </span>
         </div>
@@ -583,13 +637,15 @@
 
     function Badge({ children, active, color = 'blue' }) {
       const colors = {
-        blue: active ? 'bg-toss-blue text-white' : 'bg-toss-light text-toss-blue',
-        gray: active ? 'bg-gray-500 text-white' : 'bg-toss-gray text-toss-subtext',
-        red: active ? 'bg-red-500 text-white' : 'bg-red-50 text-red-500',
-        green: active ? 'bg-green-500 text-white' : 'bg-green-50 text-green-600'
+        blue: active ? 'bg-app-blue text-white' : 'bg-app-blueLight text-app-blue',
+        gray: active ? 'bg-gray-500 text-white' : 'bg-app-border text-app-subtext',
+        red: active ? 'bg-app-pink text-white' : 'bg-app-pinkLight text-app-pink',
+        pink: active ? 'bg-app-pink text-white' : 'bg-app-pinkLight text-app-pink',
+        green: active ? 'bg-app-green text-white' : 'bg-app-greenLight text-app-green',
+        amber: active ? 'bg-app-yellow text-app-text' : 'bg-app-yellowLight text-yellow-600'
       };
       return (
-        <span className={`px-3 py-1.5 rounded-full text-xs font-bold whitespace-nowrap ${colors[color]}`}>
+        <span className={`px-3 py-1.5 rounded-full text-[11px] md:text-xs font-bold uppercase tracking-wider whitespace-nowrap transition-all ${colors[color]}`}>
           {children}
         </span>
       );
@@ -631,7 +687,7 @@
 
       if (!chartData || chartData.length === 0) {
         return (
-          <div className="flex justify-center items-center h-56 md:h-64 mt-6 bg-toss-gray/50 rounded-xl text-toss-subtext text-sm">
+          <div className="flex justify-center items-center h-56 md:h-64 mt-6 bg-app-border/50 rounded-xl text-app-subtext text-sm">
             차트 데이터 없음
           </div>
         );
@@ -769,7 +825,7 @@
           {onDdPctChange && (
             <div className="mt-4 bg-gray-50 rounded-2xl px-4 py-3 border border-gray-100">
               <div className="flex items-center justify-between mb-2">
-                <span className="text-xs font-bold text-toss-subtext">추가매수 기준선 조정 (최고점 대비)</span>
+                <span className="text-xs font-bold text-app-subtext">추가매수 기준선 조정 (최고점 대비)</span>
                 <span className="text-sm font-bold text-red-500">{currentDdPct}%</span>
               </div>
               <input
@@ -782,7 +838,7 @@
                 className="w-full accent-red-500"
                 style={{ height: '6px' }}
               />
-              <div className="flex justify-between text-[10px] text-toss-subtext mt-1">
+              <div className="flex justify-between text-[10px] text-app-subtext mt-1">
                 <span>-100%</span>
                 <span>현재 기준: 최고점 대비 {currentDdPct}%</span>
                 <span>-5%</span>
@@ -792,7 +848,7 @@
 
           {/* 안내 문구 */}
           <div className="mt-2 flex items-center justify-between gap-2 text-xs">
-            <span className="text-toss-subtext">차트를 터치/클릭하면 해당 날짜 정보를 확인합니다.</span>
+            <span className="text-app-subtext">차트를 터치/클릭하면 해당 날짜 정보를 확인합니다.</span>
             <span className="font-semibold text-red-500 shrink-0">
               {Number.isFinite(targetDd) ? `목표선 ${formatPct(targetDd)}` : ''}
             </span>
@@ -801,19 +857,19 @@
           {/* 선택 날짜 정보 패널 */}
           {selectedPoint && (
             <div className="mt-3 bg-white border border-gray-200 rounded-2xl p-4 shadow-sm text-sm">
-              <div className="font-bold text-toss-text mb-3">차트 정보</div>
+              <div className="font-bold text-app-text mb-3">차트 정보</div>
               <div className="grid grid-cols-2 gap-3">
-                <div className="bg-toss-gray/50 rounded-xl p-3">
-                  <div className="text-xs text-toss-subtext mb-1">터치 날짜</div>
-                  <div className="font-bold text-toss-text">{selectedPoint.date}</div>
+                <div className="bg-app-border/50 rounded-xl p-3">
+                  <div className="text-xs text-app-subtext mb-1">터치 날짜</div>
+                  <div className="font-bold text-app-text">{selectedPoint.date}</div>
                 </div>
-                <div className="bg-toss-gray/50 rounded-xl p-3">
-                  <div className="text-xs text-toss-subtext mb-1">터치 낙폭</div>
-                  <div className="font-bold text-toss-text">{formatPct(selectedPoint.dd)}</div>
+                <div className="bg-app-border/50 rounded-xl p-3">
+                  <div className="text-xs text-app-subtext mb-1">터치 낙폭</div>
+                  <div className="font-bold text-app-text">{formatPct(selectedPoint.dd)}</div>
                 </div>
-                <div className="bg-toss-gray/50 rounded-xl p-3">
-                  <div className="text-xs text-toss-subtext mb-1">터치 가격</div>
-                  <div className="font-bold text-toss-text">{mode === 'KRW' ? formatKrw(selectedPoint.price) : formatNum(selectedPoint.price)}</div>
+                <div className="bg-app-border/50 rounded-xl p-3">
+                  <div className="text-xs text-app-subtext mb-1">터치 가격</div>
+                  <div className="font-bold text-app-text">{mode === 'KRW' ? formatKrw(selectedPoint.price) : formatNum(selectedPoint.price)}</div>
                 </div>
                 <div className="bg-red-50 rounded-xl p-3 border border-red-100">
                   <div className="text-xs text-red-500 mb-1">목표 가격 (≈)</div>
@@ -825,9 +881,9 @@
                   <div className="text-xs text-red-500 mb-1">목표선 낙폭</div>
                   <div className="font-bold text-red-500">{formatPct(targetDd)}</div>
                 </div>
-                <div className="bg-toss-gray/50 rounded-xl p-3">
-                  <div className="text-xs text-toss-subtext mb-1">목표까지 거리</div>
-                  <div className={`font-bold text-sm ${selectedPoint.dd <= targetDd ? 'text-toss-blue' : 'text-toss-text'}`}>
+                <div className="bg-app-border/50 rounded-xl p-3">
+                  <div className="text-xs text-app-subtext mb-1">목표까지 거리</div>
+                  <div className={`font-bold text-sm ${selectedPoint.dd <= targetDd ? 'text-app-blue' : 'text-app-text'}`}>
                     {selectedPoint.dd <= targetDd ? '기준선 이하' : `${formatPct(Math.abs(selectedPoint.dd - targetDd))} 더 필요`}
                   </div>
                 </div>
@@ -835,18 +891,18 @@
               <div className="mt-4 pt-3 border-t border-gray-100">
                 <div className="grid grid-cols-2 gap-3">
                   <div className="bg-gray-50 rounded-xl p-3">
-                    <div className="text-xs text-toss-subtext mb-1">MDD 날짜</div>
-                    <div className="font-bold text-toss-text">{mddDate || '-'}</div>
+                    <div className="text-xs text-app-subtext mb-1">MDD 날짜</div>
+                    <div className="font-bold text-app-text">{mddDate || '-'}</div>
                   </div>
                   <div className="bg-gray-50 rounded-xl p-3">
-                    <div className="text-xs text-toss-subtext mb-1">MDD 낙폭</div>
-                    <div className="font-bold text-toss-text">{formatPct(mddValue)}</div>
+                    <div className="text-xs text-app-subtext mb-1">MDD 낙폭</div>
+                    <div className="font-bold text-app-text">{formatPct(mddValue)}</div>
                   </div>
                 </div>
                 <div className="mt-3 text-xs">
                   {isSelectedMdd
                     ? <span className="font-bold text-red-500">현재 터치 지점이 MDD입니다.</span>
-                    : <span className="text-toss-subtext">현재 터치 지점은 MDD가 아닙니다.</span>
+                    : <span className="text-app-subtext">현재 터치 지점은 MDD가 아닙니다.</span>
                   }
                 </div>
               </div>
@@ -920,7 +976,7 @@
       }, [usdTimeSeries, krwTimeSeries, mode]);
 
       if (!chartData || chartData.length === 0) {
-        return <div className="flex justify-center items-center h-48 bg-toss-gray/50 rounded-xl text-toss-subtext text-sm">차트 데이터 없음</div>;
+        return <div className="flex justify-center items-center h-48 bg-app-border/50 rounded-xl text-app-subtext text-sm">차트 데이터 없음</div>;
       }
 
       const svgWidth = 1000;
@@ -1052,7 +1108,7 @@
 
             {/* Price mode: 100 base label */}
             {!isDD && (
-              <div className="absolute right-0.5 md:right-1 px-1.5 py-0.5 text-[10px] font-bold text-toss-subtext bg-white/95 rounded shadow-sm pointer-events-none leading-none" style={{ top: `calc(${toPct(getY(100))} - 9px)` }}>
+              <div className="absolute right-0.5 md:right-1 px-1.5 py-0.5 text-[10px] font-bold text-app-subtext bg-white/95 rounded shadow-sm pointer-events-none leading-none" style={{ top: `calc(${toPct(getY(100))} - 9px)` }}>
                 시작 = 100
               </div>
             )}
@@ -1062,13 +1118,13 @@
           {isDD && onDdPctChange && (
             <div className="mt-3 bg-gray-50 rounded-2xl px-4 py-3 border border-gray-100">
               <div className="flex items-center justify-between mb-2">
-                <span className="text-xs font-bold text-toss-subtext">추가매수 기준선 (최고점 대비)</span>
+                <span className="text-xs font-bold text-app-subtext">추가매수 기준선 (최고점 대비)</span>
                 <span className="text-sm font-bold text-red-500">{currentDdPct}%</span>
               </div>
               <input type="range" min="-100" max="-5" step="5" value={currentDdPct}
                 onChange={(e) => onDdPctChange(Number(e.target.value))}
                 className="w-full accent-red-500" style={{ height: '6px' }} />
-              <div className="flex justify-between text-[10px] text-toss-subtext mt-1">
+              <div className="flex justify-between text-[10px] text-app-subtext mt-1">
                 <span>-100%</span><span>-5%</span>
               </div>
             </div>
@@ -1077,25 +1133,25 @@
           {/* Touch info */}
           {sel && (
             <div className="mt-3 bg-white border border-gray-200 rounded-xl p-3 shadow-sm text-sm">
-              <div className="font-bold text-toss-text mb-2">{sel.date}</div>
+              <div className="font-bold text-app-text mb-2">{sel.date}</div>
               <div className="grid grid-cols-2 gap-2">
                 {showUsd && (
                   <div className="bg-blue-50 rounded-lg p-2">
-                    <span className="text-xs text-toss-blue font-bold">USD</span>
-                    <p className="font-bold text-toss-text">{isDD ? formatPct(sel.usdDd) : (sel.usdPrice !== null ? formatNum(sel.usdPrice) : '-')}</p>
+                    <span className="text-xs text-app-blue font-bold">USD</span>
+                    <p className="font-bold text-app-text">{isDD ? formatPct(sel.usdDd) : (sel.usdPrice !== null ? formatNum(sel.usdPrice) : '-')}</p>
                   </div>
                 )}
                 {showKrw && (
                   <div className="bg-green-50 rounded-lg p-2">
                     <span className="text-xs text-green-600 font-bold">KRW</span>
-                    <p className="font-bold text-toss-text">{isDD ? formatPct(sel.krwDd) : (sel.krwPrice !== null ? formatKrw(sel.krwPrice) : '-')}</p>
+                    <p className="font-bold text-app-text">{isDD ? formatPct(sel.krwDd) : (sel.krwPrice !== null ? formatKrw(sel.krwPrice) : '-')}</p>
                   </div>
                 )}
               </div>
             </div>
           )}
 
-          <p className="mt-2 text-xs text-toss-subtext">차트를 터치/클릭하면 해당 날짜 정보를 확인합니다.</p>
+          <p className="mt-2 text-xs text-app-subtext">차트를 터치/클릭하면 해당 날짜 정보를 확인합니다.</p>
         </div>
       );
     }
@@ -1376,24 +1432,29 @@
       // -------------------------------------
       // Expandable Section Component
       // -------------------------------------
-      function Accordion({ title, subtitle, open, onToggle, children, badge }) {
+      function Accordion({ title, subtitle, open, onToggle, children, badge, emoji }) {
         return (
-          <div className="bg-white rounded-2xl shadow-card overflow-hidden">
+          <div className="bg-white rounded-3xl shadow-card mb-4 border border-app-border overflow-hidden transition-all hover:shadow-md">
             <button
               onClick={onToggle}
-              className="w-full flex justify-between items-center p-5 md:p-6 text-left hover:bg-gray-50/50 transition-colors"
+              className="w-full flex justify-between items-center p-5 text-left outline-none"
             >
-              <div className="flex-1">
-                <div className="flex items-center gap-2">
-                  <h3 className="text-base font-bold text-toss-text">{title}</h3>
-                  {badge}
+              <div className="flex items-center gap-4 flex-1 min-w-0">
+                {emoji && <div className="w-12 h-12 bg-app-bg rounded-2xl flex items-center justify-center text-2xl shrink-0">{emoji}</div>}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h3 className="text-base font-bold text-app-text">{title}</h3>
+                    {badge}
+                  </div>
+                  {subtitle && <p className="text-sm text-app-subtext mt-1 truncate">{subtitle}</p>}
                 </div>
-                {subtitle && <p className="text-xs text-toss-subtext mt-1">{subtitle}</p>}
               </div>
-              <span className={`text-toss-subtext text-sm transition-transform ml-3 ${open ? 'rotate-180' : ''}`}>▼</span>
+              <div className={`w-8 h-8 rounded-full bg-app-bg flex items-center justify-center text-app-subtext text-xs transition-transform shrink-0 ml-2 ${open ? 'rotate-180' : ''}`}>
+                ▼
+              </div>
             </button>
             {open && (
-              <div className="px-5 md:px-6 pb-5 md:pb-6 animate-fade-in">
+              <div className="px-6 pb-6 pt-2 animate-fade-in border-t border-app-border mx-2">
                 {children}
               </div>
             )}
@@ -1406,144 +1467,140 @@
         const isLoading = dataSource === 'LOADING';
         const krwAutoAdjusted = meta.krwAnalysisStart && settings.startDate && meta.krwAnalysisStart > settings.startDate;
 
-        // --- 히어로 시그널 판정 ---
         const signal = appState.gates.finalSignal;
         const passCount = [appState.gates.fearGate, appState.gates.ddGate].filter(Boolean).length;
 
-        // 한 줄 요약 생성
-        let heroMessage = '';
-        let heroSub = '';
-        if (isLoading) {
-          heroMessage = '분석 중입니다...';
-          heroSub = '잠시만 기다려주세요.';
-        } else if (!primary) {
-          heroMessage = '데이터를 확인해주세요';
-          heroSub = '설정 탭에서 자산과 기간을 확인해주세요.';
-        } else if (signal) {
-          heroMessage = '추가매수 조건 충족!';
-          heroSub = '설정한 모든 조건이 맞았습니다. 실행 여부는 본인이 판단하세요.';
-        } else if (passCount >= 1) {
-          heroMessage = '거의 다 왔어요';
-          heroSub = `2개 조건 중 ${passCount}개 통과. 나머지 조건을 확인하세요.`;
-        } else {
-          heroMessage = '지금은 기다리세요';
-          heroSub = '아직 조건이 충족되지 않았습니다.';
-        }
+        // 히어로 상태 구성
+        const heroConfig = isLoading ? {
+          emoji: '⏳', title: '분석 중입니다...', sub: '잠시만 기다려주세요.',
+          bg: 'bg-white border-app-border', text: 'text-app-text'
+        } : !primary ? {
+          emoji: '⚠️', title: '데이터를 확인해주세요', sub: '설정에서 자산과 기간을 확인해주세요.',
+          bg: 'bg-white border-app-border', text: 'text-app-text'
+        } : signal ? {
+          emoji: '🚀', title: '지금 매수 타이밍!', sub: '모든 조건이 충족되었습니다.',
+          bg: 'bg-app-blueLight border-app-blue/20', text: 'text-app-blue'
+        } : passCount >= 1 ? {
+          emoji: '🧐', title: '조금만 더 지켜볼까요?', sub: '조건 하나가 더 충족되길 기다리세요.',
+          bg: 'bg-app-yellowLight border-yellow-200', text: 'text-yellow-600'
+        } : {
+          emoji: '🧘', title: '버텨볼 시간입니다', sub: '지금은 차분히 시장을 지켜보세요.',
+          bg: 'bg-white border-app-border', text: 'text-app-text'
+        };
 
         return (
-          <div className="space-y-4 animate-fade-in pb-10">
+          <div className="space-y-4 animate-fade-in pb-20">
 
-            {/* ============ 1단계: 히어로 시그널 ============ */}
-            <div className={`rounded-2xl p-6 md:p-8 text-center shadow-card transition-colors ${
-              signal ? 'bg-gradient-to-b from-blue-50 to-white border-2 border-toss-blue/30' : 'bg-white'
-            }`}>
-              {/* 신호등 */}
-              <div className={`w-20 h-20 md:w-24 md:h-24 rounded-full mx-auto mb-4 flex items-center justify-center text-4xl md:text-5xl shadow-lg ${
-                isLoading ? 'bg-gray-200' :
-                signal ? 'bg-toss-blue text-white' :
-                passCount >= 1 ? 'bg-amber-400 text-white' :
-                'bg-gray-300 text-white'
-              }`}>
-                {isLoading ? '⏳' : signal ? '✓' : passCount >= 1 ? '!' : '✕'}
-              </div>
+            {/* ============ 1단계: 히어로 ============ */}
+            <div className={`rounded-[32px] p-8 md:p-12 text-center border transition-colors duration-500 shadow-sm ${heroConfig.bg}`}>
+              <div className="animate-pop-in">
+                <div className="w-20 h-20 md:w-24 md:h-24 bg-white rounded-full mx-auto mb-5 flex items-center justify-center text-4xl md:text-5xl shadow-btn animate-soft-bounce">
+                  {heroConfig.emoji}
+                </div>
 
-              <h2 className={`text-2xl md:text-3xl font-extrabold mb-2 ${signal ? 'text-toss-blue' : 'text-toss-text'}`}>
-                {heroMessage}
-              </h2>
-              <p className="text-sm text-toss-subtext font-medium">{heroSub}</p>
+                <h2 className={`text-2xl md:text-3xl font-black mb-2 tracking-tight ${heroConfig.text}`}>
+                  {heroConfig.title}
+                </h2>
+                <p className="text-sm md:text-base font-medium text-app-subtext">
+                  {heroConfig.sub}
+                </p>
 
-              {/* 조건 요약 - 3개 동그라미 */}
-              {!isLoading && primary && (
-                <div className="flex justify-center gap-4 md:gap-6 mt-6">
-                  {[
-                    { label: '공포 지수', pass: appState.gates.fearGate },
-                    { label: '가격 하락', pass: appState.gates.ddGate }
-                  ].map(({ label, pass }) => (
-                    <div key={label} className="flex flex-col items-center gap-1.5">
-                      <div className={`w-10 h-10 rounded-full flex items-center justify-center text-lg font-bold ${
-                        pass ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-400'
+                {/* 조건 인디케이터 - 2개 */}
+                {!isLoading && primary && (
+                  <div className="flex justify-center gap-6 mt-8">
+                    <div className="flex flex-col items-center gap-2">
+                      <div className={`w-12 h-12 rounded-2xl flex items-center justify-center text-lg font-bold transition-all ${
+                        appState.gates.fearGate ? 'bg-app-green text-white shadow-md' : 'bg-white text-gray-300 border border-gray-100'
                       }`}>
-                        {pass ? '✓' : '—'}
+                        {appState.gates.fearGate ? '✓' : '—'}
                       </div>
-                      <span className={`text-xs font-bold ${pass ? 'text-green-600' : 'text-toss-subtext'}`}>{label}</span>
+                      <span className={`text-xs font-bold ${appState.gates.fearGate ? 'text-app-green' : 'text-app-subtext'}`}>공포 지수</span>
                     </div>
-                  ))}
-                </div>
-              )}
+                    <div className="flex flex-col items-center gap-2">
+                      <div className={`w-12 h-12 rounded-2xl flex items-center justify-center text-lg font-bold transition-all ${
+                        appState.gates.ddGate ? 'bg-app-pink text-white shadow-md' : 'bg-white text-gray-300 border border-gray-100'
+                      }`}>
+                        {appState.gates.ddGate ? '✓' : '—'}
+                      </div>
+                      <span className={`text-xs font-bold ${appState.gates.ddGate ? 'text-app-pink' : 'text-app-subtext'}`}>가격 하락</span>
+                    </div>
+                  </div>
+                )}
 
-              {/* 자산 + 기간 선택 (컴팩트) */}
-              {!isLoading && (
-                <div className="flex flex-wrap justify-center items-center gap-2 mt-6 pt-5 border-t border-gray-100">
-                  <select
-                    value={settings.symbol}
-                    onChange={handleAssetChange}
-                    className="px-3 py-1.5 bg-toss-gray rounded-lg text-xs font-bold text-toss-text outline-none cursor-pointer"
-                  >
-                    {assetsList.filter((a) => a.enabled !== false).map((a) => (
-                      <option key={a.symbol} value={a.symbol}>{a.symbol}</option>
-                    ))}
-                  </select>
+                {/* 자산 + 기간 선택 */}
+                {!isLoading && (
+                  <div className="mt-10 pt-8 border-t border-gray-200/50 flex flex-wrap justify-center items-center gap-2">
+                    <select
+                      value={settings.symbol}
+                      onChange={handleAssetChange}
+                      className="px-4 py-2.5 bg-white border border-gray-200 rounded-xl text-sm font-bold text-app-text outline-none cursor-pointer shadow-sm hover:border-gray-300"
+                    >
+                      {assetsList.filter((a) => a.enabled !== false).map((a) => (
+                        <option key={a.symbol} value={a.symbol}>{a.symbol}</option>
+                      ))}
+                    </select>
 
-                  {(() => {
-                    const dataFirstDate = meta.usdFirstDate || null;
-                    const today = new Date();
-                    const todayStr = today.toISOString().slice(0, 10);
-                    const periods = [
-                      { label: '1년', years: 1 },
-                      { label: '3년', years: 3 },
-                      { label: '5년', years: 5 },
-                      { label: '10년', years: 10 },
-                      { label: '15년', years: 15 },
-                      { label: '최대', years: null },
-                    ];
-                    function getPeriodStart(years) {
-                      if (years === null) return dataFirstDate || '1993-01-01';
-                      const d = new Date(today);
-                      d.setFullYear(d.getFullYear() - years);
-                      const s = d.toISOString().slice(0, 10);
-                      if (dataFirstDate && s < dataFirstDate) return dataFirstDate;
-                      return s;
-                    }
-                    function isActive(years) {
-                      const start = getPeriodStart(years);
-                      return settings.startDate === start && settings.endDate >= todayStr.slice(0, 7);
-                    }
-                    return periods.map(({ label, years }) => (
-                      <button
-                        key={label}
-                        onClick={() => setSettings(prev => ({ ...prev, startDate: getPeriodStart(years), endDate: '2099-12-31' }))}
-                        className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                          isActive(years) ? 'bg-toss-text text-white' : 'bg-toss-gray text-toss-subtext hover:bg-gray-200'
-                        }`}
-                      >
-                        {label}
-                      </button>
-                    ));
-                  })()}
-                </div>
-              )}
+                    {(() => {
+                      const dataFirstDate = meta.usdFirstDate || null;
+                      const today = new Date();
+                      const todayStr = today.toISOString().slice(0, 10);
+                      const periods = [
+                        { label: '1년', years: 1 },
+                        { label: '3년', years: 3 },
+                        { label: '5년', years: 5 },
+                        { label: '10년', years: 10 },
+                        { label: '최대', years: null },
+                      ];
+                      function getPeriodStart(years) {
+                        if (years === null) return dataFirstDate || '1993-01-01';
+                        const d = new Date(today);
+                        d.setFullYear(d.getFullYear() - years);
+                        const s = d.toISOString().slice(0, 10);
+                        if (dataFirstDate && s < dataFirstDate) return dataFirstDate;
+                        return s;
+                      }
+                      function isActive(years) {
+                        const start = getPeriodStart(years);
+                        return settings.startDate === start && settings.endDate >= todayStr.slice(0, 7);
+                      }
+                      return periods.map(({ label, years }) => (
+                        <button
+                          key={label}
+                          onClick={() => setSettings(prev => ({ ...prev, startDate: getPeriodStart(years), endDate: '2099-12-31' }))}
+                          className={`px-4 py-2.5 rounded-xl text-sm font-bold transition-all ${
+                            isActive(years) ? 'bg-app-text text-white shadow-sm' : 'bg-white text-app-subtext border border-gray-200 hover:bg-gray-50'
+                          }`}
+                        >
+                          {label}
+                        </button>
+                      ));
+                    })()}
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* 경고 메시지 */}
             {fetchStatus.error && (
-              <div className="bg-yellow-50 text-yellow-800 p-4 rounded-xl text-sm font-semibold border border-yellow-200">
+              <div className="bg-app-yellowLight text-yellow-700 p-4 rounded-2xl text-sm font-semibold border border-yellow-200">
                 ⚠️ 데이터 로드 실패: {fetchStatus.error} → 샘플 데이터로 동작 중
               </div>
             )}
 
             {/* ============ 2단계: 왜 이런 판단인가요? ============ */}
             <Accordion
-              title="왜 이런 판단인가요?"
+              title="현재 상태 진단"
               subtitle="시장 공포 + 가격 하락을 체크합니다"
+              emoji="🔍"
               open={showWhy}
               onToggle={() => setShowWhy(!showWhy)}
-              badge={<span className={`text-xs font-bold px-2 py-0.5 rounded-full ${signal ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-toss-subtext'}`}>{passCount}/2</span>}
+              badge={<Badge active={signal} color={signal ? 'green' : 'amber'}>{passCount}/2 통과</Badge>}
             >
               <div className="space-y-2">
                 <div className="flex justify-between items-center bg-gray-50 p-3 rounded-lg border border-gray-100">
                   <div>
-                    <span className="text-sm font-medium text-toss-text">시장 공포 지수</span>
-                    <p className="text-xs text-toss-subtext mt-0.5">"극단적 공포"일 때 통과</p>
+                    <span className="text-sm font-medium text-app-text">시장 공포 지수</span>
+                    <p className="text-xs text-app-subtext mt-0.5">"극단적 공포"일 때 통과</p>
                   </div>
                   <Badge active={appState.gates.fearGate} color={appState.gates.fearGate ? 'green' : 'red'}>
                     {liveRating ? `${liveRating.rating} (${liveRating.score})` : settings.fearGreedIndex}
@@ -1551,8 +1608,8 @@
                 </div>
                 <div className="flex justify-between items-center bg-gray-50 p-3 rounded-lg border border-gray-100">
                   <div>
-                    <span className="text-sm font-medium text-toss-text">가격 하락폭</span>
-                    <p className="text-xs text-toss-subtext mt-0.5">최고점 대비 {settings.targetDdPct}% 이상 빠지면 통과</p>
+                    <span className="text-sm font-medium text-app-text">가격 하락폭</span>
+                    <p className="text-xs text-app-subtext mt-0.5">최고점 대비 {settings.targetDdPct}% 이상 빠지면 통과</p>
                   </div>
                   <Badge active={appState.gates.ddGate} color={appState.gates.ddGate ? 'green' : 'red'}>
                     {primary ? `현재 ${formatPct1(primary.metrics.currentDd)}` : '-'}
@@ -1563,8 +1620,9 @@
 
             {/* ============ 3단계: 현재 시장은 어떤가요? ============ */}
             <Accordion
-              title="현재 시장은 어떤가요?"
+              title="가격 및 낙폭 차트"
               subtitle={primary ? `${settings.symbol} 최고점 대비 ${formatPct1(primary.metrics.currentDd)} 하락 중` : '데이터 없음'}
+              emoji="📊"
               open={showChart}
               onToggle={() => setShowChart(!showChart)}
             >
@@ -1577,21 +1635,21 @@
                 <div className="flex gap-2">
                   <button
                     onClick={() => { if (!chartUsd && !chartKrw) return; if (chartUsd && !chartKrw) return; setChartUsd(!chartUsd); }}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                      chartUsd ? 'bg-blue-100 text-toss-blue ring-1 ring-toss-blue/30' : 'bg-gray-100 text-toss-subtext'
+                    className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+                      chartUsd ? 'bg-app-blue text-white shadow-sm' : 'bg-app-bg text-app-subtext'
                     }`}
                   >
-                    <span className={`w-2 h-2 rounded-full ${chartUsd ? 'bg-toss-blue' : 'bg-gray-300'}`}></span>
-                    달러(USD)
+                    <span className={`w-2 h-2 rounded-full ${chartUsd ? 'bg-white' : 'bg-gray-300'}`}></span>
+                    USD 달러
                   </button>
                   <button
                     onClick={() => { if (!chartKrw && !chartUsd) return; if (chartKrw && !chartUsd) return; setChartKrw(!chartKrw); }}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                      chartKrw ? 'bg-green-100 text-green-700 ring-1 ring-green-300/50' : 'bg-gray-100 text-toss-subtext'
+                    className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+                      chartKrw ? 'bg-app-green text-white shadow-sm' : 'bg-app-bg text-app-subtext'
                     }`}
                   >
-                    <span className={`w-2 h-2 rounded-full ${chartKrw ? 'bg-green-500' : 'bg-gray-300'}`}></span>
-                    원화(KRW)
+                    <span className={`w-2 h-2 rounded-full ${chartKrw ? 'bg-white' : 'bg-gray-300'}`}></span>
+                    KRW 원화
                   </button>
                 </div>
 
@@ -1599,7 +1657,7 @@
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                   {/* 낙폭 차트 */}
                   <div className="p-4 rounded-xl border border-gray-100 bg-gray-50">
-                    <h4 className="font-bold text-toss-text mb-3 text-sm">📉 최고점 대비 하락률</h4>
+                    <h4 className="font-bold text-app-text mb-3 text-sm">📉 최고점 대비 하락률</h4>
                     <OverlayChart
                       usdTimeSeries={appState.usdEngine ? appState.usdEngine.timeSeries : null}
                       krwTimeSeries={appState.krwEngine ? appState.krwEngine.timeSeries : null}
@@ -1615,7 +1673,7 @@
 
                   {/* 주가 차트 (정규화) */}
                   <div className="p-4 rounded-xl border border-gray-100 bg-gray-50">
-                    <h4 className="font-bold text-toss-text mb-3 text-sm">📈 가격 흐름 (시작 = 100 기준)</h4>
+                    <h4 className="font-bold text-app-text mb-3 text-sm">📈 가격 흐름 (시작 = 100 기준)</h4>
                     <OverlayChart
                       usdTimeSeries={appState.usdEngine ? appState.usdEngine.timeSeries : null}
                       krwTimeSeries={appState.krwEngine ? appState.krwEngine.timeSeries : null}
@@ -1629,24 +1687,24 @@
                 {/* 핵심 수치 요약 */}
                 <div className="grid grid-cols-2 gap-2">
                   {chartUsd && appState.usdEngine && (
-                    <div className="bg-blue-50 p-3 rounded-xl border border-blue-100">
-                      <p className="text-xs text-toss-blue font-bold mb-2">USD 기준</p>
+                    <div className="bg-app-blueLight p-3 rounded-xl border border-app-blue/20">
+                      <p className="text-xs text-app-blue font-bold mb-2">USD 기준</p>
                       <div className="space-y-1 text-xs">
-                        <div className="flex justify-between"><span className="text-toss-subtext">현재가</span><span className="font-bold text-toss-text">{formatNum(appState.usdEngine.metrics.currentPrice)}</span></div>
-                        <div className="flex justify-between"><span className="text-toss-subtext">최고가</span><span className="font-bold text-toss-text">{formatNum(appState.usdEngine.metrics.ath)}</span></div>
-                        <div className="flex justify-between"><span className="text-toss-subtext">현재 하락</span><span className="font-bold text-toss-blue">{formatPct(appState.usdEngine.metrics.currentDd)}</span></div>
-                        <div className="flex justify-between"><span className="text-toss-subtext">목표 가격</span><span className="font-bold text-red-500">{formatNum(appState.usdEngine.target.price)} ({appState.usdEngine.target.ddPct}%)</span></div>
+                        <div className="flex justify-between"><span className="text-app-subtext">현재가</span><span className="font-bold text-app-text">{formatNum(appState.usdEngine.metrics.currentPrice)}</span></div>
+                        <div className="flex justify-between"><span className="text-app-subtext">최고가</span><span className="font-bold text-app-text">{formatNum(appState.usdEngine.metrics.ath)}</span></div>
+                        <div className="flex justify-between"><span className="text-app-subtext">현재 하락</span><span className="font-bold text-app-blue">{formatPct(appState.usdEngine.metrics.currentDd)}</span></div>
+                        <div className="flex justify-between"><span className="text-app-subtext">목표 가격</span><span className="font-bold text-app-pink">{formatNum(appState.usdEngine.target.price)} ({appState.usdEngine.target.ddPct}%)</span></div>
                       </div>
                     </div>
                   )}
                   {chartKrw && appState.krwEngine && (
-                    <div className="bg-green-50 p-3 rounded-xl border border-green-100">
-                      <p className="text-xs text-green-700 font-bold mb-2">KRW 기준</p>
+                    <div className="bg-app-greenLight p-3 rounded-xl border border-app-green/20">
+                      <p className="text-xs text-app-green font-bold mb-2">KRW 기준</p>
                       <div className="space-y-1 text-xs">
-                        <div className="flex justify-between"><span className="text-toss-subtext">현재가</span><span className="font-bold text-toss-text">{formatKrw(appState.krwEngine.metrics.currentPrice)}</span></div>
-                        <div className="flex justify-between"><span className="text-toss-subtext">최고가</span><span className="font-bold text-toss-text">{formatKrw(appState.krwEngine.metrics.ath)}</span></div>
-                        <div className="flex justify-between"><span className="text-toss-subtext">현재 하락</span><span className="font-bold text-green-700">{formatPct(appState.krwEngine.metrics.currentDd)}</span></div>
-                        <div className="flex justify-between"><span className="text-toss-subtext">목표 가격</span><span className="font-bold text-red-500">{formatKrw(appState.krwEngine.target.price)} ({appState.krwEngine.target.ddPct}%)</span></div>
+                        <div className="flex justify-between"><span className="text-app-subtext">현재가</span><span className="font-bold text-app-text">{formatKrw(appState.krwEngine.metrics.currentPrice)}</span></div>
+                        <div className="flex justify-between"><span className="text-app-subtext">최고가</span><span className="font-bold text-app-text">{formatKrw(appState.krwEngine.metrics.ath)}</span></div>
+                        <div className="flex justify-between"><span className="text-app-subtext">현재 하락</span><span className="font-bold text-app-green">{formatPct(appState.krwEngine.metrics.currentDd)}</span></div>
+                        <div className="flex justify-between"><span className="text-app-subtext">목표 가격</span><span className="font-bold text-app-pink">{formatKrw(appState.krwEngine.target.price)} ({appState.krwEngine.target.ddPct}%)</span></div>
                       </div>
                     </div>
                   )}
@@ -1661,6 +1719,7 @@
                 ? `${settings.targetDdPct}% 기준, 과거 ${primary.target.signalCount}번 중 회복률 ${Math.round(primary.target.winRate * 100)}%`
                 : '과거 신호 없음'
               }
+              emoji="📈"
               open={showHistory}
               onToggle={() => setShowHistory(!showHistory)}
             >
@@ -1668,16 +1727,16 @@
                 <div className="space-y-4">
                   <div className="grid grid-cols-3 gap-2 text-center">
                     <div className="bg-gray-50 p-3 rounded-xl">
-                      <p className="text-xl md:text-2xl font-extrabold text-toss-blue">{primary.target.signalCount}<span className="text-sm">번</span></p>
-                      <p className="text-[10px] md:text-xs text-toss-subtext mt-1 font-medium">빠진 횟수</p>
+                      <p className="text-xl md:text-2xl font-extrabold text-app-blue">{primary.target.signalCount}<span className="text-sm">번</span></p>
+                      <p className="text-[10px] md:text-xs text-app-subtext mt-1 font-medium">빠진 횟수</p>
                     </div>
                     <div className="bg-gray-50 p-3 rounded-xl">
-                      <p className="text-xl md:text-2xl font-extrabold text-green-600">{primary.target.winRate !== null ? Math.round(primary.target.winRate * 100) + '%' : '-'}</p>
-                      <p className="text-[10px] md:text-xs text-toss-subtext mt-1 font-medium">회복 확률</p>
+                      <p className="text-xl md:text-2xl font-extrabold text-app-green">{primary.target.winRate !== null ? Math.round(primary.target.winRate * 100) + '%' : '-'}</p>
+                      <p className="text-[10px] md:text-xs text-app-subtext mt-1 font-medium">회복 확률</p>
                     </div>
                     <div className="bg-gray-50 p-3 rounded-xl">
-                      <p className="text-xl md:text-2xl font-extrabold text-toss-text">{Math.round(primary.metrics.mdd * 100)}%</p>
-                      <p className="text-[10px] md:text-xs text-toss-subtext mt-1 font-medium">최대 낙폭</p>
+                      <p className="text-xl md:text-2xl font-extrabold text-app-text">{Math.round(primary.metrics.mdd * 100)}%</p>
+                      <p className="text-[10px] md:text-xs text-app-subtext mt-1 font-medium">최대 낙폭</p>
                     </div>
                   </div>
 
@@ -1688,10 +1747,10 @@
                   {/* 낙폭별 승률 테이블 (펼쳐보기) */}
                   <button
                     onClick={() => setShowDetailTable(!showDetailTable)}
-                    className="w-full flex justify-between items-center p-3 bg-toss-gray text-toss-text rounded-xl text-sm font-bold hover:bg-gray-200 transition-colors"
+                    className="w-full flex justify-between items-center p-3 bg-app-border text-app-text rounded-xl text-sm font-bold hover:bg-gray-200 transition-colors"
                   >
                     <span>낙폭별 상세 승률</span>
-                    <span className={`text-toss-subtext transition-transform ${showDetailTable ? 'rotate-180' : ''}`}>▼</span>
+                    <span className={`text-app-subtext transition-transform ${showDetailTable ? 'rotate-180' : ''}`}>▼</span>
                   </button>
 
                   {showDetailTable && (
@@ -1702,10 +1761,10 @@
 
                         return (
                           <div key={mode}>
-                            <p className="text-xs font-bold text-toss-subtext mb-2">{mode === 'USD' ? '달러 기준' : '원화 기준'}</p>
+                            <p className="text-xs font-bold text-app-subtext mb-2">{mode === 'USD' ? '달러 기준' : '원화 기준'}</p>
                             <div className="overflow-x-auto rounded-xl border border-gray-100">
                               <table className="w-full text-xs text-left whitespace-nowrap">
-                                <thead className="bg-toss-gray text-toss-subtext">
+                                <thead className="bg-app-border text-app-subtext">
                                   <tr>
                                     <th className="py-2 px-3 font-semibold">낙폭</th>
                                     <th className="py-2 px-3 font-semibold">회복률</th>
@@ -1718,8 +1777,8 @@
                                     const isTarget = r.ddPct === engine.target.ddPct;
                                     const isCurrent = !r.beyondMdd && engine.metrics.currentDd <= r.threshold &&
                                       (i === 0 || engine.metrics.currentDd > engine.fixedDdTable[i-1].threshold);
-                                    const rowClass = isTarget ? 'bg-toss-light/60' : isCurrent ? 'bg-yellow-50' : r.beyondMdd ? 'opacity-30' : '';
-                                    const textClass = isTarget ? 'font-bold text-toss-blue' : isCurrent ? 'font-bold text-amber-700' : 'text-toss-text';
+                                    const rowClass = isTarget ? 'bg-app-blueLight/60' : isCurrent ? 'bg-yellow-50' : r.beyondMdd ? 'opacity-30' : '';
+                                    const textClass = isTarget ? 'font-bold text-app-blue' : isCurrent ? 'font-bold text-amber-700' : 'text-app-text';
                                     return (
                                       <tr key={r.ddPct} className={`border-b border-gray-50 ${rowClass}`}>
                                         <td className={`py-2 px-3 ${textClass}`}>{r.ddPct}%</td>
@@ -1735,7 +1794,7 @@
                           </div>
                         );
                       })}
-                      <div className="text-[10px] text-toss-subtext space-y-0.5">
+                      <div className="text-[10px] text-app-subtext space-y-0.5">
                         <p>• 파란색: 설정된 기준 낙폭 / 노란색: 현재 낙폭 구간</p>
                         <p>• 회복률: 해당 낙폭 돌파 후 최고점까지 다시 올라온 비율</p>
                         <p>• 흐린 행: 이 기간에 도달한 적 없는 구간</p>
@@ -1754,7 +1813,7 @@
         if (!appState.usdEngine && !appState.krwEngine) {
           return (
             <Card>
-              <div className="py-12 text-center text-toss-subtext flex flex-col items-center font-medium">
+              <div className="py-12 text-center text-app-subtext flex flex-col items-center font-medium">
                 {appState.configWarning || '설정(Settings) 탭에서 날짜 범위나 모드를 확인해주세요.'}
               </div>
             </Card>
@@ -1775,7 +1834,7 @@
                 <Card key={mode} title={mode === 'USD' ? '달러 기준 낙폭별 회복 승률' : '원화 기준 낙폭별 회복 승률'}>
                   <div className="overflow-x-auto -mx-5 md:mx-0">
                     <table className="w-full text-sm text-left whitespace-nowrap">
-                      <thead className="bg-toss-gray text-toss-subtext border-b border-gray-200">
+                      <thead className="bg-app-border text-app-subtext border-b border-gray-200">
                         <tr>
                           <th className="py-3 px-4 font-semibold">낙폭</th>
                           <th className="py-3 px-4 font-semibold">회복률</th>
@@ -1789,8 +1848,8 @@
                           const isTarget = r.ddPct === engine.target.ddPct;
                           const isCurrent = !r.beyondMdd && engine.metrics.currentDd <= r.threshold &&
                             (i === 0 || engine.metrics.currentDd > engine.fixedDdTable[i-1].threshold);
-                          const rowClass = isTarget ? 'bg-toss-light/60' : isCurrent ? 'bg-yellow-50' : r.beyondMdd ? 'opacity-30' : '';
-                          const textClass = isTarget ? 'font-bold text-toss-blue' : isCurrent ? 'font-bold text-amber-700' : 'text-toss-text';
+                          const rowClass = isTarget ? 'bg-app-blueLight/60' : isCurrent ? 'bg-yellow-50' : r.beyondMdd ? 'opacity-30' : '';
+                          const textClass = isTarget ? 'font-bold text-app-blue' : isCurrent ? 'font-bold text-amber-700' : 'text-app-text';
                           return (
                             <tr key={r.ddPct} className={`border-b border-gray-100 hover:bg-gray-50 transition-colors ${rowClass}`}>
                               <td className={`py-3 px-4 ${textClass}`}>{r.ddPct}%</td>
@@ -1804,7 +1863,7 @@
                       </tbody>
                     </table>
                   </div>
-                  <div className="mt-4 text-xs text-toss-subtext space-y-1">
+                  <div className="mt-4 text-xs text-app-subtext space-y-1">
                     <p>• 파란색: 현재 설정된 기준 낙폭 / 노란색: 현재 낙폭이 속한 구간</p>
                     <p>• 회복률: 해당 낙폭을 처음 돌파한 뒤 역대 최고가 이상으로 회복된 비율</p>
                     <p>• 조건일: 해당 낙폭 이하에 머문 총 일수 / 비중: 전체 기간 대비 조건일 비율</p>
@@ -1821,7 +1880,7 @@
         return (
           <div className="space-y-6 animate-fade-in pb-10">
             <Card title="프리셋 (Presets)">
-              <p className="text-sm text-toss-subtext mb-4">초보자를 위한 추천 설정값을 한 번에 적용할 수 있습니다.</p>
+              <p className="text-sm text-app-subtext mb-4">초보자를 위한 추천 설정값을 한 번에 적용할 수 있습니다.</p>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                 {[
                   { label: '보수형 (-30%)', preset: { targetDdPct: -30, fearGreedIndex: 'Extreme Fear' } },
@@ -1832,7 +1891,7 @@
                   <button
                     key={label}
                     onClick={() => applyPreset(preset)}
-                    className="p-3 bg-gray-50 border border-gray-200 rounded-xl hover:bg-toss-light hover:border-toss-blue hover:text-toss-blue transition-colors text-sm font-bold text-toss-text text-center"
+                    className="p-3 bg-gray-50 border border-gray-200 rounded-xl hover:bg-app-blueLight hover:border-app-blue hover:text-app-blue transition-colors text-sm font-bold text-app-text text-center"
                   >
                     {label}
                   </button>
@@ -1844,8 +1903,8 @@
               <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                 <div className="space-y-5">
                   <div>
-                    <label className="block text-xs font-bold text-toss-subtext mb-1.5">분석 자산</label>
-                    <select value={settings.symbol} onChange={handleAssetChange} className="w-full p-3 bg-toss-gray border-none rounded-xl text-sm font-medium focus:ring-2 focus:ring-toss-blue outline-none cursor-pointer">
+                    <label className="block text-xs font-bold text-app-subtext mb-1.5">분석 자산</label>
+                    <select value={settings.symbol} onChange={handleAssetChange} className="w-full p-3 bg-app-border border-none rounded-xl text-sm font-medium focus:ring-2 focus:ring-app-blue outline-none cursor-pointer">
                       {assetsList.filter((a) => a.enabled !== false).map((a) => (
                         <option key={a.symbol} value={a.symbol}>{a.symbol} - {a.name || '자산'}</option>
                       ))}
@@ -1853,18 +1912,18 @@
                   </div>
 
                   <div>
-                    <label className="block text-xs font-bold text-toss-subtext mb-1.5">목표 추가매수 낙폭 (최고점 대비)</label>
-                    <select name="targetDdPct" value={settings.targetDdPct} onChange={handleSettingChange} className="w-full p-3 bg-toss-gray border-none rounded-xl text-sm font-medium focus:ring-2 focus:ring-toss-blue outline-none cursor-pointer">
+                    <label className="block text-xs font-bold text-app-subtext mb-1.5">목표 추가매수 낙폭 (최고점 대비)</label>
+                    <select name="targetDdPct" value={settings.targetDdPct} onChange={handleSettingChange} className="w-full p-3 bg-app-border border-none rounded-xl text-sm font-medium focus:ring-2 focus:ring-app-blue outline-none cursor-pointer">
                       {FIXED_DD_STEPS.map(pct => (
                         <option key={pct} value={pct}>{pct}%</option>
                       ))}
                     </select>
-                    <p className="mt-2 text-xs text-toss-subtext">역대 최고가 대비 이 낙폭에서 추가매수를 고려합니다.</p>
+                    <p className="mt-2 text-xs text-app-subtext">역대 최고가 대비 이 낙폭에서 추가매수를 고려합니다.</p>
                   </div>
 
                   <div>
-                    <label className="block text-xs font-bold text-toss-subtext mb-1.5">표시 통화</label>
-                    <select name="currencyMode" value={settings.currencyMode} onChange={handleSettingChange} className="w-full p-3 bg-toss-gray border-none rounded-xl text-sm font-medium focus:ring-2 focus:ring-toss-blue outline-none cursor-pointer">
+                    <label className="block text-xs font-bold text-app-subtext mb-1.5">표시 통화</label>
+                    <select name="currencyMode" value={settings.currencyMode} onChange={handleSettingChange} className="w-full p-3 bg-app-border border-none rounded-xl text-sm font-medium focus:ring-2 focus:ring-app-blue outline-none cursor-pointer">
                       <option value="BOTH">달러 & 원화 동시</option>
                       <option value="USD">달러만</option>
                       <option value="KRW">원화만</option>
@@ -1872,8 +1931,8 @@
                   </div>
 
                   <div>
-                    <label className="block text-xs font-bold text-toss-subtext mb-1.5">주 신호 기준</label>
-                    <select name="primarySignalMode" value={settings.primarySignalMode} onChange={handleSettingChange} className="w-full p-3 bg-toss-gray border-none rounded-xl text-sm font-medium focus:ring-2 focus:ring-toss-blue outline-none cursor-pointer">
+                    <label className="block text-xs font-bold text-app-subtext mb-1.5">주 신호 기준</label>
+                    <select name="primarySignalMode" value={settings.primarySignalMode} onChange={handleSettingChange} className="w-full p-3 bg-app-border border-none rounded-xl text-sm font-medium focus:ring-2 focus:ring-app-blue outline-none cursor-pointer">
                       <option value="USD">달러 기준 우선</option>
                       <option value="KRW">원화 기준 우선</option>
                     </select>
@@ -1883,12 +1942,12 @@
                 <div className="space-y-5">
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className="block text-xs font-bold text-toss-subtext mb-1.5">시작일</label>
-                      <input type="date" name="startDate" value={settings.startDate} onChange={handleSettingChange} className="w-full p-3 bg-toss-gray border-none rounded-xl text-sm font-medium outline-none" />
+                      <label className="block text-xs font-bold text-app-subtext mb-1.5">시작일</label>
+                      <input type="date" name="startDate" value={settings.startDate} onChange={handleSettingChange} className="w-full p-3 bg-app-border border-none rounded-xl text-sm font-medium outline-none" />
                     </div>
                     <div>
-                      <label className="block text-xs font-bold text-toss-subtext mb-1.5">종료일</label>
-                      <input type="date" name="endDate" value={settings.endDate} onChange={handleSettingChange} className="w-full p-3 bg-toss-gray border-none rounded-xl text-sm font-medium outline-none" />
+                      <label className="block text-xs font-bold text-app-subtext mb-1.5">종료일</label>
+                      <input type="date" name="endDate" value={settings.endDate} onChange={handleSettingChange} className="w-full p-3 bg-app-border border-none rounded-xl text-sm font-medium outline-none" />
                     </div>
                   </div>
                 </div>
@@ -1896,19 +1955,19 @@
             </Card>
 
             <Card title="데이터 관리">
-              <p className="text-sm text-toss-subtext mb-5">
+              <p className="text-sm text-app-subtext mb-5">
                 GitHub Pages에서는 정적 JSON 파일을 읽어옵니다. 필요하면 수동 JSON 업로드로 현재 데이터를 덮어쓸 수 있습니다.
               </p>
 
               <div className="flex flex-col sm:flex-row gap-3 flex-wrap">
-                <button onClick={handleReloadServerData} className="px-5 py-2.5 bg-gray-200 text-toss-text rounded-xl font-bold text-sm hover:bg-gray-300 transition-colors shadow-sm">서버 데이터 다시 불러오기</button>
-                <button onClick={handleResetSampleData} className="px-5 py-2.5 bg-gray-200 text-toss-text rounded-xl font-bold text-sm hover:bg-gray-300 transition-colors shadow-sm">SPY 샘플 데이터 리셋</button>
-                <button onClick={handleTemplateDownload} className="px-5 py-2.5 bg-white border border-gray-200 text-toss-text rounded-xl font-bold text-sm hover:bg-gray-50 transition-colors shadow-sm">JSON 템플릿 다운로드</button>
-                <button onClick={handleExport} className="px-5 py-2.5 bg-white border border-gray-200 text-toss-text rounded-xl font-bold text-sm hover:bg-gray-50 transition-colors shadow-sm">현재 데이터 내보내기</button>
+                <button onClick={handleReloadServerData} className="px-5 py-2.5 bg-gray-200 text-app-text rounded-xl font-bold text-sm hover:bg-gray-300 transition-colors shadow-sm">서버 데이터 다시 불러오기</button>
+                <button onClick={handleResetSampleData} className="px-5 py-2.5 bg-gray-200 text-app-text rounded-xl font-bold text-sm hover:bg-gray-300 transition-colors shadow-sm">SPY 샘플 데이터 리셋</button>
+                <button onClick={handleTemplateDownload} className="px-5 py-2.5 bg-white border border-gray-200 text-app-text rounded-xl font-bold text-sm hover:bg-gray-50 transition-colors shadow-sm">JSON 템플릿 다운로드</button>
+                <button onClick={handleExport} className="px-5 py-2.5 bg-white border border-gray-200 text-app-text rounded-xl font-bold text-sm hover:bg-gray-50 transition-colors shadow-sm">현재 데이터 내보내기</button>
 
                 <div className="relative">
                   <input type="file" accept=".json" ref={fileInputRef} onChange={handleImport} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
-                  <button className="w-full px-5 py-2.5 bg-toss-text text-white rounded-xl font-bold text-sm hover:bg-gray-700 transition-colors shadow-sm pointer-events-none">수동 데이터 불러오기</button>
+                  <button className="w-full px-5 py-2.5 bg-app-text text-white rounded-xl font-bold text-sm hover:bg-gray-700 transition-colors shadow-sm pointer-events-none">수동 데이터 불러오기</button>
                 </div>
               </div>
             </Card>
@@ -1919,8 +1978,8 @@
                 onClick={() => setShowVerify(!showVerify)}
                 className="w-full flex justify-between items-center p-5 md:p-6 text-left hover:bg-gray-50 transition-colors"
               >
-                <h3 className="text-lg font-bold text-toss-text">시스템 검증</h3>
-                <span className={`text-toss-subtext text-xl transition-transform ${showVerify ? 'rotate-180' : ''}`}>▼</span>
+                <h3 className="text-lg font-bold text-app-text">시스템 검증</h3>
+                <span className={`text-app-subtext text-xl transition-transform ${showVerify ? 'rotate-180' : ''}`}>▼</span>
               </button>
               {showVerify && (
                 <div className="px-5 md:px-6 pb-5 md:pb-6">
@@ -1978,10 +2037,10 @@
         return (
           <div className="space-y-6 animate-fade-in">
             <div>
-              <p className="text-sm text-toss-subtext mb-5">정적 JSON 로딩, 데이터 무결성, KRW 품질, 엔진 연산을 점검합니다.</p>
+              <p className="text-sm text-app-subtext mb-5">정적 JSON 로딩, 데이터 무결성, KRW 품질, 엔진 연산을 점검합니다.</p>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm text-left">
-                  <thead className="bg-toss-gray text-toss-subtext border-b border-gray-200">
+                  <thead className="bg-app-border text-app-subtext border-b border-gray-200">
                     <tr>
                       <th className="py-3 px-5 font-semibold">Test Case</th>
                       <th className="py-3 px-5 font-semibold">Expected</th>
@@ -1992,7 +2051,7 @@
                   <tbody>
                     {tests.map((t) => (
                       <tr key={t.id} className="border-b border-gray-100 hover:bg-gray-50">
-                        <td className="py-3 px-5 font-medium text-toss-text">{t.id}: {t.name}</td>
+                        <td className="py-3 px-5 font-medium text-app-text">{t.id}: {t.name}</td>
                         <td className="py-3 px-5 font-mono text-gray-600">{t.expected}</td>
                         <td className="py-3 px-5 font-mono text-gray-600">{t.actual}</td>
                         <td className="py-3 px-5"><ResultBadge pass={t.pass} /></td>
@@ -2004,7 +2063,7 @@
             </div>
 
             <div className="mt-6">
-              <h4 className="font-bold text-toss-text mb-3">KRW 데이터 상태</h4>
+              <h4 className="font-bold text-app-text mb-3">KRW 데이터 상태</h4>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
                 {[
                   { label: '전체 행 수', value: String(rawData.length) },
@@ -2012,14 +2071,14 @@
                   { label: 'KRW null 행 수 (정상)', value: String(krwNullCount) },
                   { label: 'KRW 이상값 행 수', value: String(krwAnomalyCount), warn: krwAnomalyCount > 0 }
                 ].map(({ label, value, highlight, warn }) => (
-                  <div key={label} className={`p-3 rounded-xl border ${warn ? 'bg-red-50 border-red-200' : highlight ? 'bg-toss-light border-toss-blue/20' : 'bg-toss-gray/50 border-gray-100'}`}>
-                    <p className="text-xs font-medium text-toss-subtext mb-1">{label}</p>
-                    <p className={`font-bold text-lg ${warn ? 'text-red-600' : highlight ? 'text-toss-blue' : 'text-toss-text'}`}>{value}</p>
+                  <div key={label} className={`p-3 rounded-xl border ${warn ? 'bg-red-50 border-red-200' : highlight ? 'bg-app-blueLight border-app-blue/20' : 'bg-app-border/50 border-gray-100'}`}>
+                    <p className="text-xs font-medium text-app-subtext mb-1">{label}</p>
+                    <p className={`font-bold text-lg ${warn ? 'text-red-600' : highlight ? 'text-app-blue' : 'text-app-text'}`}>{value}</p>
                   </div>
                 ))}
               </div>
 
-              <div className="mt-4 text-xs text-toss-subtext space-y-1">
+              <div className="mt-4 text-xs text-app-subtext space-y-1">
                 <p>• KRW null 행: 환율 데이터 시작 전 구간으로 정상입니다.</p>
                 <p>• KRW 이상값 행: 0, NaN, 음수 등 비정상 값입니다. 0이어야 정상입니다.</p>
                 <p>• KRW 실분석 시작일: {meta.krwAnalysisStart || '-'} / KRW 최초 유효일: {meta.krwFirstDate || '-'}</p>
@@ -2033,10 +2092,10 @@
         return (
           <div className="space-y-6 animate-fade-in pb-10">
             <Card title="1. 이 앱이 하는 일">
-              <ul className="space-y-2 text-sm text-toss-text font-medium">
-                <li className="flex items-start"><span className="text-toss-blue mr-2">•</span> 선택한 기간 동안 가격이 역대 최고점에서 얼마나 떨어졌는지(낙폭)를 추적합니다.</li>
-                <li className="flex items-start"><span className="text-toss-blue mr-2">•</span> "이 정도 빠지면 추가매수하겠다"는 기준선을 정하고, 과거에 그 기준에서 샀다면 결과가 어땠을지 승률로 보여줍니다.</li>
-                <li className="flex items-start"><span className="text-toss-blue mr-2">•</span> 공포 지수와 생활 여건까지 함께 체크해서 지금이 실행할 만한 타이밍인지 알려줍니다.</li>
+              <ul className="space-y-2 text-sm text-app-text font-medium">
+                <li className="flex items-start"><span className="text-app-blue mr-2">•</span> 선택한 기간 동안 가격이 역대 최고점에서 얼마나 떨어졌는지(낙폭)를 추적합니다.</li>
+                <li className="flex items-start"><span className="text-app-blue mr-2">•</span> "이 정도 빠지면 추가매수하겠다"는 기준선을 정하고, 과거에 그 기준에서 샀다면 결과가 어땠을지 승률로 보여줍니다.</li>
+                <li className="flex items-start"><span className="text-app-blue mr-2">•</span> 공포 지수와 생활 여건까지 함께 체크해서 지금이 실행할 만한 타이밍인지 알려줍니다.</li>
               </ul>
             </Card>
 
@@ -2049,19 +2108,19 @@
                   { title: '공포 지수', desc: '시장이 얼마나 겁먹었는지 나타내는 지표입니다. "극단적 공포"일 때가 역사적으로 좋은 매수 기회인 경우가 많았습니다.' }
                 ].map(({ title, desc }) => (
                   <div key={title} className="bg-gray-50 p-4 rounded-xl">
-                    <p className="font-bold text-toss-blue mb-1">{title}</p>
-                    <p className="text-sm text-toss-subtext">{desc}</p>
+                    <p className="font-bold text-app-blue mb-1">{title}</p>
+                    <p className="text-sm text-app-subtext">{desc}</p>
                   </div>
                 ))}
               </div>
             </Card>
 
             <Card title="3. 승률은 이렇게 계산됩니다">
-              <ul className="space-y-2 text-sm text-toss-text font-medium">
-                <li className="flex items-start"><span className="text-toss-blue mr-2">•</span> 가격이 기준선 아래로 처음 내려간 날을 "매수 신호"로 잡습니다.</li>
-                <li className="flex items-start"><span className="text-toss-blue mr-2">•</span> 그 뒤 가격이 역대 최고점 이상으로 회복되면 "승리", 안 되면 "패배"입니다.</li>
+              <ul className="space-y-2 text-sm text-app-text font-medium">
+                <li className="flex items-start"><span className="text-app-blue mr-2">•</span> 가격이 기준선 아래로 처음 내려간 날을 "매수 신호"로 잡습니다.</li>
+                <li className="flex items-start"><span className="text-app-blue mr-2">•</span> 그 뒤 가격이 역대 최고점 이상으로 회복되면 "승리", 안 되면 "패배"입니다.</li>
                 <li className="flex items-start"><span className="text-amber-600 mr-2">⚠</span> 최근 신호는 아직 회복할 시간이 부족해서 승률이 낮게 나올 수 있습니다.</li>
-                <li className="flex items-start"><span className="text-toss-blue mr-2">•</span> 차트의 붉은 음영 구간이 "기준선 아래" 구간입니다.</li>
+                <li className="flex items-start"><span className="text-app-blue mr-2">•</span> 차트의 붉은 음영 구간이 "기준선 아래" 구간입니다.</li>
               </ul>
             </Card>
 
@@ -2074,7 +2133,7 @@
             </Card>
 
             <Card title="5. 사용 흐름">
-              <ol className="space-y-4 text-sm text-toss-text">
+              <ol className="space-y-4 text-sm text-app-text">
                 {[
                   '분석할 자산(예: SPY)과 기간을 선택합니다.',
                   '추가매수 기준 낙폭을 설정합니다. 예: -20% = 최고점 대비 20% 빠졌을 때.',
@@ -2083,7 +2142,7 @@
                   '생활 조건과 시장 조건을 함께 보고 실행 여부를 판단합니다.'
                 ].map((step, i) => (
                   <li key={i} className="flex items-center">
-                    <span className="bg-toss-blue text-white w-6 h-6 rounded-full flex items-center justify-center mr-3 font-bold shrink-0">{i + 1}</span>
+                    <span className="bg-app-blue text-white w-6 h-6 rounded-full flex items-center justify-center mr-3 font-bold shrink-0">{i + 1}</span>
                     {step}
                   </li>
                 ))}
@@ -2094,24 +2153,31 @@
       }
 
       return (
-        <div className="min-h-screen font-sans flex flex-col items-center">
-          <div className="w-full max-w-6xl p-5 md:p-8 pt-10">
-            <header className="mb-6 pl-2">
-              <h1 className="text-2xl md:text-3xl font-extrabold text-toss-text tracking-tight">버텨볼까? 더살까</h1>
+        <div className="min-h-screen flex flex-col items-center">
+          <div className="w-full max-w-3xl p-5 pt-8">
+            <header className="mb-8 flex justify-between items-center px-1">
+              <h1 className="text-2xl font-black text-app-text tracking-tight">버텨볼까? 더살까</h1>
+              <span className={`px-2.5 py-1 rounded-md text-[10px] font-bold tracking-wider ${
+                dataSource === 'FETCHED' ? 'bg-app-greenLight text-app-green' :
+                dataSource === 'LOADING' ? 'bg-app-border text-app-subtext' :
+                'bg-app-yellowLight text-yellow-600'
+              }`}>
+                {dataSource === 'FETCHED' ? 'LIVE DATA' : dataSource === 'LOADING' ? 'LOADING' : dataSource === 'IMPORTED' ? 'IMPORTED' : 'SAMPLE'}
+              </span>
             </header>
 
-            <nav className="flex space-x-2 mb-6 overflow-x-auto no-scrollbar pb-2 px-2">
+            <nav className="flex space-x-2 mb-6 bg-white p-1.5 rounded-2xl border border-app-border shadow-sm">
               {[
                 { id: 'dashboard', label: '대시보드' },
-                { id: 'detail', label: '낙폭별 승률' },
+                { id: 'detail', label: '승률표' },
                 { id: 'settings', label: '설정' },
-                { id: 'guide', label: '이용 가이드' }
+                { id: 'guide', label: '가이드' }
               ].map((tab) => (
                 <button
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id)}
-                  className={`px-4 py-2 rounded-xl text-sm font-bold whitespace-nowrap transition-all ${
-                    activeTab === tab.id ? 'bg-toss-text text-white shadow-md' : 'bg-white text-toss-subtext border border-gray-200'
+                  className={`flex-1 py-2.5 rounded-xl text-sm font-bold transition-all ${
+                    activeTab === tab.id ? 'bg-app-text text-white shadow-btn' : 'text-app-subtext hover:bg-app-bg'
                   }`}
                 >
                   {tab.label}
@@ -2119,7 +2185,7 @@
               ))}
             </nav>
 
-            <main className="px-2">
+            <main>
               {activeTab === 'dashboard' && renderDashboard()}
               {activeTab === 'detail' && renderDetail()}
               {activeTab === 'settings' && renderSettings()}
