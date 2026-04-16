@@ -32,19 +32,31 @@ def save_json(path, data):
     print(f"  Saved {path}")
 
 
-def merge_by_date(existing, new_rows):
+def dedupe_by_date(records):
     """
-    Deduplicate by date. If a date exists in both, new_rows wins (latest value).
-    Result is sorted ascending by date.
+    Remove duplicates by date. When duplicates exist, keep the LAST occurrence
+    (assumed to be the most recent / freshly fetched value).
+    Returns records sorted ascending by date.
     """
     by_date = {}
-    for row in existing:
+    for row in records:
         if isinstance(row, dict) and "date" in row:
-            by_date[row["date"]] = row
-    for row in new_rows:
-        if isinstance(row, dict) and "date" in row:
-            by_date[row["date"]] = row  # overwrite
+            by_date[row["date"]] = row  # later entries overwrite earlier
     return sorted(by_date.values(), key=lambda r: r["date"])
+
+
+def load_and_clean(path):
+    """
+    Load JSON and immediately deduplicate. If the file had duplicates,
+    rewrite it cleanly. Returns the cleaned list.
+    """
+    raw = load_json(path)
+    cleaned = dedupe_by_date(raw)
+    if len(cleaned) != len(raw):
+        removed = len(raw) - len(cleaned)
+        print(f"  [cleanup] {path.name}: removed {removed} duplicate row(s)")
+        save_json(path, cleaned)
+    return cleaned
 
 
 def last_date(records):
@@ -76,9 +88,7 @@ def score_to_rating(score):
 
 
 def update_fear_greed():
-    existing = load_json(FG_PATH)
-    if not isinstance(existing, list):
-        existing = []
+    existing = load_and_clean(FG_PATH)
     today = datetime.utcnow().strftime("%Y-%m-%d")
     if existing and existing[-1]["date"] == today:
         print(f"  Fear & Greed: already up to date")
@@ -97,8 +107,7 @@ def update_fear_greed():
         score = round(float(fg["score"]), 1)
         rating = fg.get("rating", score_to_rating(score)).title()
         entry = {"date": today, "score": score, "rating": rating}
-        # 동일 날짜가 이미 있으면 덮어쓰기 (수동 재실행 시 중복 방지)
-        merged = merge_by_date(existing, [entry])
+        merged = dedupe_by_date(existing + [entry])
         save_json(FG_PATH, merged)
         print(f"  Fear & Greed: {score} ({rating})")
     except Exception as e:
@@ -109,18 +118,18 @@ def main():
     print(f"Update Start: {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}")
     for symbol in PRICE_SYMBOLS:
         path = PRICES_DIR / f"{symbol}.json"
-        existing = load_json(path)
+        existing = load_and_clean(path)
         new_rows = fetch_new_rows(symbol, last_date(existing), field="close")
         if new_rows:
-            merged = merge_by_date(existing, new_rows)
+            merged = dedupe_by_date(existing + new_rows)
             save_json(path, merged)
         time.sleep(1)
     print("\n[FX]")
     fx_path = FX_DIR / "USDKRW.json"
-    existing_fx = load_json(fx_path)
+    existing_fx = load_and_clean(fx_path)
     new_fx = fetch_new_rows(FX_SYMBOL, last_date(existing_fx), field="rate")
     if new_fx:
-        merged_fx = merge_by_date(existing_fx, new_fx)
+        merged_fx = dedupe_by_date(existing_fx + new_fx)
         save_json(fx_path, merged_fx)
     print("\n[Fear & Greed]")
     update_fear_greed()
