@@ -918,8 +918,12 @@
     // -------------------------------------
     function OverlayChart({ usdTimeSeries, krwTimeSeries, showUsd, showKrw, mode, targetDd, primaryMode, currentDdPct, onDdPctChange }) {
       const [selectedIndex, setSelectedIndex] = useState(null);
+      const [sliderDraft, setSliderDraft] = useState(currentDdPct);
       const wrapRef = useRef(null);
       const lastTouchRef = useRef(false);
+
+      // 외부에서 currentDdPct가 바뀌면 draft도 동기화
+      useEffect(() => { setSliderDraft(currentDdPct); }, [currentDdPct]);
 
       // mode: 'drawdown' or 'price'
       const isDD = mode === 'drawdown';
@@ -1114,21 +1118,28 @@
             )}
           </div>
 
-          {/* Slider (DD mode only) */}
-          {isDD && onDdPctChange && (
-            <div className="mt-3 bg-gray-50 rounded-2xl px-4 py-3 border border-gray-100">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-xs font-bold text-app-subtext">추가매수 기준선 (최고점 대비)</span>
-                <span className="text-sm font-bold text-red-500">{currentDdPct}%</span>
+          {/* Slider (DD mode only) - 부드러운 드래그 + 5% 스냅 */}
+          {isDD && onDdPctChange && (() => {
+            const snappedDisplay = Math.round(sliderDraft / 5) * 5;
+            const commit = () => { if (snappedDisplay !== currentDdPct) onDdPctChange(snappedDisplay); else setSliderDraft(snappedDisplay); };
+            return (
+              <div className="mt-3 bg-app-bg rounded-2xl px-4 py-4 border border-app-border">
+                <div className="flex items-center justify-between mb-3">
+                  <span className="text-xs font-bold text-app-subtext">추가매수 기준선 (최고점 대비)</span>
+                  <span className="text-base font-extrabold text-app-pink">{snappedDisplay}%</span>
+                </div>
+                <input type="range" min="-100" max="-5" step="1" value={sliderDraft}
+                  onChange={(e) => setSliderDraft(Number(e.target.value))}
+                  onMouseUp={commit}
+                  onTouchEnd={commit}
+                  onKeyUp={commit}
+                  className="w-full" />
+                <div className="flex justify-between text-[10px] text-app-subtext mt-2">
+                  <span>-100%</span><span>-5%</span>
+                </div>
               </div>
-              <input type="range" min="-100" max="-5" step="5" value={currentDdPct}
-                onChange={(e) => onDdPctChange(Number(e.target.value))}
-                className="w-full accent-red-500" style={{ height: '6px' }} />
-              <div className="flex justify-between text-[10px] text-app-subtext mt-1">
-                <span>-100%</span><span>-5%</span>
-              </div>
-            </div>
-          )}
+            );
+          })()}
 
           {/* Touch info */}
           {sel && (
@@ -1172,6 +1183,27 @@
       const [showDetailTable, setShowDetailTable] = useState(false);
       const [chartUsd, setChartUsd] = useState(true);
       const [chartKrw, setChartKrw] = useState(true);
+
+      // 토글 시 스크롤 위치 유지 (mobile Samsung Browser 점프 방지)
+      function toggleWithScrollLock(setter, ref) {
+        return (e) => {
+          if (e && e.preventDefault) e.preventDefault();
+          const topBefore = ref && ref.current ? ref.current.getBoundingClientRect().top : 0;
+          setter(prev => !prev);
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+              if (ref && ref.current) {
+                const topAfter = ref.current.getBoundingClientRect().top;
+                const delta = topAfter - topBefore;
+                if (Math.abs(delta) > 0.5) window.scrollBy({ top: delta, left: 0, behavior: 'auto' });
+              }
+            });
+          });
+        };
+      }
+
+      const verifyRef = useRef(null);
+      const detailTableRef = useRef(null);
       const [settings, setSettings] = useLocalStorage('mdd_settings_fixed_v1', DEFAULT_SETTINGS);
       const [reloadToken, setReloadToken] = useState(0);
       const [rawData, setRawData] = useState([]);
@@ -1433,10 +1465,30 @@
       // Expandable Section Component
       // -------------------------------------
       function Accordion({ title, subtitle, open, onToggle, children, badge, emoji }) {
+        const containerRef = useRef(null);
+
+        function handleToggle(e) {
+          e.preventDefault();
+          const topBefore = containerRef.current ? containerRef.current.getBoundingClientRect().top : 0;
+          onToggle();
+          // 두 번의 rAF로 React 재렌더 후 위치 보정 (히어로/상단 점프 방지)
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+              if (!containerRef.current) return;
+              const topAfter = containerRef.current.getBoundingClientRect().top;
+              const delta = topAfter - topBefore;
+              if (Math.abs(delta) > 0.5) {
+                window.scrollBy({ top: delta, left: 0, behavior: 'auto' });
+              }
+            });
+          });
+        }
+
         return (
-          <div className="bg-white rounded-3xl shadow-card mb-4 border border-app-border overflow-hidden transition-all hover:shadow-md">
+          <div ref={containerRef} className="bg-white rounded-3xl shadow-card mb-4 border border-app-border overflow-hidden transition-all hover:shadow-md">
             <button
-              onClick={onToggle}
+              type="button"
+              onClick={handleToggle}
               className="w-full flex justify-between items-center p-5 text-left outline-none"
             >
               <div className="flex items-center gap-4 flex-1 min-w-0">
@@ -1745,13 +1797,16 @@
                   </div>
 
                   {/* 낙폭별 승률 테이블 (펼쳐보기) */}
-                  <button
-                    onClick={() => setShowDetailTable(!showDetailTable)}
-                    className="w-full flex justify-between items-center p-3 bg-app-border text-app-text rounded-xl text-sm font-bold hover:bg-gray-200 transition-colors"
-                  >
-                    <span>낙폭별 상세 승률</span>
-                    <span className={`text-app-subtext transition-transform ${showDetailTable ? 'rotate-180' : ''}`}>▼</span>
-                  </button>
+                  <div ref={detailTableRef}>
+                    <button
+                      type="button"
+                      onClick={toggleWithScrollLock(setShowDetailTable, detailTableRef)}
+                      className="w-full flex justify-between items-center p-3 bg-app-bg text-app-text rounded-xl text-sm font-bold hover:bg-app-border transition-colors"
+                    >
+                      <span>낙폭별 상세 승률</span>
+                      <span className={`text-app-subtext transition-transform ${showDetailTable ? 'rotate-180' : ''}`}>▼</span>
+                    </button>
+                  </div>
 
                   {showDetailTable && (
                     <div className="space-y-4 animate-fade-in">
@@ -1973,9 +2028,10 @@
             </Card>
 
             {/* 시스템 검증 - 접이식 */}
-            <div className="bg-white rounded-2xl shadow-card mb-6 overflow-hidden">
+            <div ref={verifyRef} className="bg-white rounded-3xl shadow-card mb-6 border border-app-border overflow-hidden">
               <button
-                onClick={() => setShowVerify(!showVerify)}
+                type="button"
+                onClick={toggleWithScrollLock(setShowVerify, verifyRef)}
                 className="w-full flex justify-between items-center p-5 md:p-6 text-left hover:bg-gray-50 transition-colors"
               >
                 <h3 className="text-lg font-bold text-app-text">시스템 검증</h3>
