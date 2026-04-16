@@ -1,4 +1,4 @@
-"""
+""""""
 update_prices.py
 - data/prices/*.json    : {"date": "YYYY-MM-DD", "close": float}
 - data/fx/USDKRW.json  : {"date": "YYYY-MM-DD", "rate": float}
@@ -17,11 +17,13 @@ FX_DIR        = Path("data/fx")
 FG_PATH       = Path("data/fear_greed.json")
 CNN_FG_URL    = "https://production.dataviz.cnn.io/index/fearandgreed/graphdata"
 
+
 def load_json(path):
     if path.exists():
         with open(path, encoding="utf-8") as f:
             return json.load(f)
     return []
+
 
 def save_json(path, data):
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -29,8 +31,25 @@ def save_json(path, data):
         json.dump(data, f, ensure_ascii=False, indent=2)
     print(f"  Saved {path}")
 
+
+def merge_by_date(existing, new_rows):
+    """
+    Deduplicate by date. If a date exists in both, new_rows wins (latest value).
+    Result is sorted ascending by date.
+    """
+    by_date = {}
+    for row in existing:
+        if isinstance(row, dict) and "date" in row:
+            by_date[row["date"]] = row
+    for row in new_rows:
+        if isinstance(row, dict) and "date" in row:
+            by_date[row["date"]] = row  # overwrite
+    return sorted(by_date.values(), key=lambda r: r["date"])
+
+
 def last_date(records):
     return records[-1]["date"] if records else None
+
 
 def fetch_new_rows(ticker_symbol, after_date, field):
     start = (datetime.strptime(after_date, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d") if after_date else "1990-01-01"
@@ -47,12 +66,14 @@ def fetch_new_rows(ticker_symbol, after_date, field):
     print(f"  {ticker_symbol}: +{len(rows)} rows")
     return rows
 
+
 def score_to_rating(score):
     if score <= 25: return "Extreme Fear"
     if score <= 45: return "Fear"
     if score <= 55: return "Neutral"
     if score <= 75: return "Greed"
     return "Extreme Greed"
+
 
 def update_fear_greed():
     existing = load_json(FG_PATH)
@@ -63,12 +84,12 @@ def update_fear_greed():
         print(f"  Fear & Greed: already up to date")
         return
     headers = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-    "Accept": "application/json, text/plain, */*",
-    "Accept-Language": "en-US,en;q=0.9",
-    "Referer": "https://edition.cnn.com/markets/fear-and-greed",
-    "Origin": "https://edition.cnn.com"
-}
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Accept": "application/json, text/plain, */*",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Referer": "https://edition.cnn.com/markets/fear-and-greed",
+        "Origin": "https://edition.cnn.com"
+    }
     try:
         res = requests.get(CNN_FG_URL, headers=headers, timeout=10)
         res.raise_for_status()
@@ -76,11 +97,13 @@ def update_fear_greed():
         score = round(float(fg["score"]), 1)
         rating = fg.get("rating", score_to_rating(score)).title()
         entry = {"date": today, "score": score, "rating": rating}
-        existing.append(entry)
-        save_json(FG_PATH, existing)
+        # 동일 날짜가 이미 있으면 덮어쓰기 (수동 재실행 시 중복 방지)
+        merged = merge_by_date(existing, [entry])
+        save_json(FG_PATH, merged)
         print(f"  Fear & Greed: {score} ({rating})")
     except Exception as e:
         print(f"  Fear & Greed fetch failed: {e}")
+
 
 def main():
     print(f"Update Start: {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}")
@@ -89,17 +112,20 @@ def main():
         existing = load_json(path)
         new_rows = fetch_new_rows(symbol, last_date(existing), field="close")
         if new_rows:
-            save_json(path, existing + new_rows)
+            merged = merge_by_date(existing, new_rows)
+            save_json(path, merged)
         time.sleep(1)
     print("\n[FX]")
     fx_path = FX_DIR / "USDKRW.json"
     existing_fx = load_json(fx_path)
     new_fx = fetch_new_rows(FX_SYMBOL, last_date(existing_fx), field="rate")
     if new_fx:
-        save_json(fx_path, existing_fx + new_fx)
+        merged_fx = merge_by_date(existing_fx, new_fx)
+        save_json(fx_path, merged_fx)
     print("\n[Fear & Greed]")
     update_fear_greed()
     print("\nDone!")
+
 
 if __name__ == "__main__":
     main()
