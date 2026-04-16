@@ -1,4 +1,4 @@
-""""""
+"""
 update_prices.py
 - data/prices/*.json    : {"date": "YYYY-MM-DD", "close": float}
 - data/fx/USDKRW.json  : {"date": "YYYY-MM-DD", "rate": float}
