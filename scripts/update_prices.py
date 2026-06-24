@@ -69,8 +69,11 @@ def fetch_new_rows(ticker_symbol, after_date, field):
     if start > today:
         print(f"  {ticker_symbol}: already up to date")
         return []
+    # yfinance의 end는 배타적(exclusive) 경계라서 today 당일 데이터가 절대 포함되지 않음.
+    # 1일을 더해 today까지 실제로 포함되도록 보정.
+    end = (datetime.strptime(today, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
     print(f"  {ticker_symbol}: fetching {start} ~ {today}...")
-    df = yf.Ticker(ticker_symbol).history(start=start, end=today, auto_adjust=True)
+    df = yf.Ticker(ticker_symbol).history(start=start, end=end, auto_adjust=True)
     if df.empty:
         print(f"  {ticker_symbol}: no new data")
         return []
