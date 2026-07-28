@@ -2,15 +2,24 @@ name: Update Price Data
 
 on:
   schedule:
-    - cron: '0 1 * * 2-6'   # 한국시간 기준 화~토 오전 10시 (UTC 01:00)
-  workflow_dispatch:          # 수동 실행 버튼도 활성화
+    # 정각을 피해 분 단위를 어긋나게 지정 (Actions 스케줄 혼잡 회피)
+    # 01:27 UTC = 한국시간 10:27 (화~토) — 미국 전일 종가 확정 후
+    - cron: '27 1 * * 2-6'
+    # 04:27 UTC = 한국시간 13:27 (화~토) — 1차 실행이 누락됐을 때를 위한 재시도
+    - cron: '27 4 * * 2-6'
+  workflow_dispatch:
+
+# 동시 실행 방지 (1차와 재시도가 겹쳐 push 충돌하는 것 방지)
+concurrency:
+  group: update-price-data
+  cancel-in-progress: false
 
 jobs:
   update:
     runs-on: ubuntu-latest
 
     permissions:
-      contents: write         # JSON 파일 커밋 권한
+      contents: write
 
     steps:
       - name: Checkout
@@ -22,7 +31,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install yfinance requests
+        run: pip install --upgrade yfinance requests
 
       - name: Run update script
         run: python scripts/update_prices.py
@@ -32,5 +41,11 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add data/
-          git diff --cached --quiet && echo "No changes" || git commit -m "Auto update: $(date -u '+%Y-%m-%d')"
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+          git commit -m "Auto update: $(date -u '+%Y-%m-%d %H:%M UTC')"
+          # 그동안 다른 커밋이 있었을 수 있으므로 rebase 후 push
+          git pull --rebase origin ${{ github.ref_name }}
           git push
