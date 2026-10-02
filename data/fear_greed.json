@@ -623,5 +623,10 @@
     "date": "2026-10-01",
     "score": 30.7,
     "rating": "Fear"
+  },
+  {
+    "date": "2026-10-02",
+    "score": 28.0,
+    "rating": "Fear"
   }
 ]
