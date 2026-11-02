@@ -150,6 +150,7 @@
     </div>
   </div>
 
+  <script src="./quote-tools.js"></script>
   <script type="text/babel" data-presets="react,env">
     const { useState, useMemo, useEffect, useRef } = React;
 
@@ -637,7 +638,7 @@
     // -------------------------------------
     // UI Components
     // -------------------------------------
-    const HISTORY_VERSION = '2026.11.02.4';
+    const HISTORY_VERSION = '2026.11.02.5';
 
     function HistoryMethodNote() {
       return <div className="rounded-xl bg-amber-50 p-4 text-xs leading-relaxed text-amber-800 space-y-2">
@@ -718,6 +719,67 @@
             </div>
           </details>}
       </section>;
+    }
+
+    function LiveQuotePanel({ symbol, usdEngine, krwEngine, dataSource }) {
+      const [endpoint, setEndpoint] = useLocalStorage('retirelab_google_quote_endpoint_v1', '');
+      const [draft, setDraft] = useState(endpoint);
+      const [quote, setQuote] = useState(null);
+      const [error, setError] = useState('');
+      const [busy, setBusy] = useState(false);
+      const [clock, setClock] = useState(Date.now());
+      const currentRequest = useRef(null);
+      const requestNumber = useRef(0);
+      async function refresh() {
+        const id = ++requestNumber.current;
+        currentRequest.current?.cancel();
+        if (!endpoint) { setBusy(false); return; }
+        setBusy(true); setError('');
+        const request = QuoteTools.request(endpoint);
+        currentRequest.current = request;
+        try {
+          const payload = await request.promise;
+          const next = QuoteTools.normalize(payload, symbol);
+          if (id === requestNumber.current) { setQuote(next); setClock(Date.now()); }
+        } catch (e) { if (id === requestNumber.current) setError(e.message || '시세 조회 실패'); }
+        finally { if (id === requestNumber.current) setBusy(false); }
+      }
+      useEffect(() => {
+        setQuote(null); setError(''); refresh();
+        return () => { requestNumber.current++; currentRequest.current?.cancel(); };
+      }, [endpoint, symbol]);
+      useEffect(() => { const timer = setInterval(() => setClock(Date.now()), 30000); return () => clearInterval(timer); }, []);
+      const age = quote ? Math.max(0, (clock - Date.parse(quote.tradeAt)) / 60000) : null;
+      const comparison = quote && dataSource === 'FETCHED' ? QuoteTools.compareWithClose(quote, usdEngine, 'USD', clock) : null;
+      const stamp = value => value ? new Date(value).toLocaleString('ko-KR', {timeZone:'Asia/Seoul',hour12:false}) + ' KST' : '확인 불가';
+      return <Card title={`${symbol} 현재 제공 시세`} titleRight={<button type="button" disabled={busy || !endpoint} onClick={refresh} className="rounded-xl bg-app-blue px-3 py-2 text-xs font-bold text-white disabled:opacity-40">{busy ? '조회 중…' : '현재가 새로고침'}</button>}>
+        <div className={endpoint ? "min-h-[280px] space-y-3" : "space-y-3"} aria-live="polite">
+          {!endpoint && <p className="text-sm text-app-subtext">Google 시세 연결이 필요합니다. 아래 ‘시세 연결 설정’에서 웹앱 주소를 등록하면 앱 진입 시 자동 조회합니다.</p>}
+          {endpoint && !quote && <p className="text-sm text-app-subtext">{busy ? 'Google 제공 시세를 조회하고 있습니다.' : '장중 시세를 가져오지 못했습니다. 기존 최근 종가를 참고해주세요.'}</p>}
+          {quote && <>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="rounded-xl bg-app-blueLight p-3"><p className="text-xs text-app-blue">USD · {age <= 60 ? '장중 참고 시세' : '최근 거래 시세'}</p><p className="text-xl font-extrabold">${formatNum(quote.price)}</p></div>
+              <div className="rounded-xl bg-app-greenLight p-3"><p className="text-xs text-app-green">KRW · 조회 환율로 환산</p><p className="text-xl font-extrabold">{quote.fx ? formatKrw(quote.price * quote.fx) : '환율 확인 불가'}</p></div>
+            </div>
+            <p className="text-xs leading-relaxed text-app-subtext">거래 시각: {stamp(quote.tradeAt)}<br />앱 조회: {stamp(quote.fetchedAt)} · 제공 지연: {quote.delayMinutes === null ? '확인 불가' : `${quote.delayMinutes}분`}<br />Google Finance는 최대 20분 지연될 수 있습니다. 새로고침은 Google 원천 시세의 즉시 갱신을 보장하지 않습니다.</p>
+            {comparison ? <p className="rounded-xl bg-gray-50 p-3 text-sm">달러 종가 최고가 대비 장중 참고 하락: <b>{formatPct(comparison.dd)}</b><br />{comparison.reached ? '설정한 종가 기준 가격에 도달했습니다.' : `종가 기준 목표 $${formatNum(comparison.targetPrice)}까지 현재 제공 가격에서 추가 ${formatPct(Math.min(0, comparison.remaining))} 필요`}</p>
+              : <p className="text-xs text-app-subtext">장중 낙폭 비교 보류: 시세의 거래 시각과 최근 종가의 가격 기준이 일치하는지 확인해야 합니다.</p>}
+            {error && <p className="text-xs text-amber-700">이번 갱신 실패 · 위 가격은 직전 조회값입니다.</p>}
+          </>}
+          {error && <p role="status" className="text-xs text-red-600">{error}</p>}
+        </div>
+        <p className="mt-3 text-xs leading-relaxed text-app-subtext">현재 상태 진단·과거 차트·회복 통계는 확정 종가 기준입니다. 이 시세는 화면에서 참고하며 종가 기록에 저장하지 않습니다. 원화 환산액은 주가와 환율의 관측 시각이 다를 수 있습니다.</p>
+        <details className="mt-4 rounded-xl border border-gray-100 p-3">
+          <summary className="cursor-pointer text-sm font-bold">시세 연결 설정</summary>
+          <p className="my-3 text-xs text-app-subtext">계좌 정보가 없는 시세 전용 Apps Script 웹앱 주소를 등록하세요. 주소는 이 브라우저에 저장됩니다.</p>
+          <form onSubmit={e => { e.preventDefault(); try { const url = QuoteTools.endpointUrl(draft.trim()); setEndpoint(url); setError(''); } catch (err) { setError(err.message); } }} className="space-y-2">
+            <label className="block text-xs font-bold" htmlFor="google-quotes-endpoint">Google 시세 웹앱 주소</label>
+            <input id="google-quotes-endpoint" value={draft} onChange={e => setDraft(e.target.value)} className="w-full rounded-lg border border-gray-200 p-2 text-xs" placeholder="https://script.google.com/macros/s/…/exec" />
+            <div className="flex gap-2"><button className="rounded-lg bg-app-blue px-3 py-2 text-xs text-white" type="submit">연결하고 조회</button><button className="rounded-lg bg-gray-100 px-3 py-2 text-xs" type="button" onClick={() => {setEndpoint('');setDraft('');}}>연결 해제</button></div>
+          </form>
+          <a className="mt-3 block text-xs font-bold text-app-blue underline" href="https://github.com/retirelab/mdd-buy-signal-lab/blob/main/docs/google-quotes-setup.md" target="_blank" rel="noopener noreferrer">설치 코드와 연결 방법</a>
+        </details>
+      </Card>;
     }
 
     function Card({ title, children, className = '', titleRight = null }) {
@@ -1739,6 +1801,8 @@
               </div>
             )}
 
+            <LiveQuotePanel symbol={settings.symbol} usdEngine={appState.usdEngine} krwEngine={appState.krwEngine} dataSource={dataSource} />
+
             {/* ============ 2단계: 왜 이런 판단인가요? ============ */}
             <Accordion
               title="현재 상태 진단"
@@ -1872,7 +1936,7 @@
                     <div className="bg-app-blueLight p-3 rounded-xl border border-app-blue/20">
                       <p className="text-xs text-app-blue font-bold mb-2">USD 기준</p>
                       <div className="space-y-1 text-xs">
-                        <div className="flex justify-between"><span className="text-app-subtext">현재가</span><span className="font-bold text-app-text">{formatNum(appState.usdEngine.metrics.currentPrice)}</span></div>
+                        <div className="flex justify-between"><span className="text-app-subtext">최근 종가</span><span className="font-bold text-app-text">{formatNum(appState.usdEngine.metrics.currentPrice)}</span></div>
                         <div className="flex justify-between"><span className="text-app-subtext">최고가</span><span className="font-bold text-app-text">{formatNum(appState.usdEngine.metrics.ath)}</span></div>
                         <div className="flex justify-between"><span className="text-app-subtext">현재 하락</span><span className="font-bold text-app-blue">{formatPct(appState.usdEngine.metrics.currentDd)}</span></div>
                         <div className="flex justify-between"><span className="text-app-subtext">목표 가격</span><span className="font-bold text-app-pink">{formatNum(appState.usdEngine.target.price)} ({appState.usdEngine.target.ddPct}%)</span></div>
@@ -1883,7 +1947,7 @@
                     <div className="bg-app-greenLight p-3 rounded-xl border border-app-green/20">
                       <p className="text-xs text-app-green font-bold mb-2">KRW 기준</p>
                       <div className="space-y-1 text-xs">
-                        <div className="flex justify-between"><span className="text-app-subtext">현재가</span><span className="font-bold text-app-text">{formatKrw(appState.krwEngine.metrics.currentPrice)}</span></div>
+                        <div className="flex justify-between"><span className="text-app-subtext">최근 종가</span><span className="font-bold text-app-text">{formatKrw(appState.krwEngine.metrics.currentPrice)}</span></div>
                         <div className="flex justify-between"><span className="text-app-subtext">최고가</span><span className="font-bold text-app-text">{formatKrw(appState.krwEngine.metrics.ath)}</span></div>
                         <div className="flex justify-between"><span className="text-app-subtext">현재 하락</span><span className="font-bold text-app-green">{formatPct(appState.krwEngine.metrics.currentDd)}</span></div>
                         <div className="flex justify-between"><span className="text-app-subtext">목표 가격</span><span className="font-bold text-app-pink">{formatKrw(appState.krwEngine.target.price)} ({appState.krwEngine.target.ddPct}%)</span></div>
