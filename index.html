@@ -637,7 +637,7 @@
     // -------------------------------------
     // UI Components
     // -------------------------------------
-    const HISTORY_VERSION = '2026.11.02.2';
+    const HISTORY_VERSION = '2026.11.02.3';
 
     function HistoryMethodNote() {
       return <div className="rounded-xl bg-amber-50 p-4 text-xs leading-relaxed text-amber-800 space-y-2">
@@ -1113,9 +1113,10 @@
     function OverlayChart({ model, selectedDate, onSelectDate, showUsd, showKrw, mode, targetDd, currentDdPct, onDdPctChange }) {
       const [sliderDraft, setSliderDraft] = useState(currentDdPct);
       const wrapRef = useRef(null);
-      const lastTouchRef = useRef(false);
+      const gestureRef = useRef(null);
       useEffect(() => { setSliderDraft(currentDdPct); }, [currentDdPct]);
       const isDD = mode === 'drawdown';
+      const previewTarget = isDD && Number.isFinite(sliderDraft) ? Math.round(sliderDraft / 5) * 5 / 100 : targetDd;
       const sel = model.byDate.get(selectedDate) || null;
       const chartData = useMemo(() => {
         if (!sel || model.sampled.some(row => row.date === sel.date)) return model.sampled;
@@ -1130,7 +1131,7 @@
       const usdKey = isDD ? 'usdDd' : 'usdIndex';
       const krwKey = isDD ? 'krwDd' : 'krwIndex';
       const vals = model.sampled.flatMap(row => [showUsd ? row[usdKey] : null, showKrw ? row[krwKey] : null]).filter(Number.isFinite);
-      const yMin = isDD ? Math.min(...vals, -.05, Number.isFinite(targetDd) ? targetDd : 0) * 1.12 : Math.min(...vals, 100) * .95;
+      const yMin = isDD ? Math.min(...vals, -.05, Number.isFinite(previewTarget) ? previewTarget : 0) * 1.12 : Math.min(...vals, 100) * .95;
       const yMax = isDD ? 0 : Math.max(...vals, 100) * 1.05;
       const getX = row => chartX(row.timestamp, first.timestamp, last.timestamp);
       const getY = value => g.top + ((yMax - value) / (yMax - yMin)) * (endY - g.top);
@@ -1157,7 +1158,7 @@
       }
       const usdPath = showUsd ? buildPath(usdKey) : { line: '', area: '' };
       const krwPath = showKrw ? buildPath(krwKey) : { line: '', area: '' };
-      const yTarget = isDD && Number.isFinite(targetDd) ? getY(targetDd) : null;
+      const yTarget = isDD && Number.isFinite(previewTarget) ? getY(previewTarget) : null;
 
       function selectAt(clientX) {
         if (!wrapRef.current) return;
@@ -1168,10 +1169,18 @@
       return <div>
         <div ref={wrapRef} className="h-56 w-full relative rounded-xl cursor-crosshair"
           data-testid={`chart-${mode}`} role="group" aria-label={isDD ? '일별 낙폭 차트' : '일별 가격 지수 차트'}
-          onClick={e => { if (!lastTouchRef.current) selectAt(e.clientX); }}
-          onTouchStart={e => { if (e.touches.length) { lastTouchRef.current = true; selectAt(e.touches[0].clientX); } }}
-          onTouchMove={e => { if (e.touches.length) selectAt(e.touches[0].clientX); }}
-          onTouchEnd={() => { setTimeout(() => { lastTouchRef.current = false; }, 350); }}>
+          style={{ touchAction: 'pan-y' }}
+          onPointerDown={e => { if (e.button === 0) gestureRef.current = { x: e.clientX, y: e.clientY, horizontal: false }; }}
+          onPointerMove={e => {
+            const g = gestureRef.current;
+            if (!g) return;
+            const dx = Math.abs(e.clientX - g.x), dy = Math.abs(e.clientY - g.y);
+            if (!g.horizontal && dy > 8 && dy > dx) { gestureRef.current = null; return; }
+            if (dx > 8 && dx > dy) { g.horizontal = true; e.currentTarget.setPointerCapture(e.pointerId); }
+            if (g.horizontal) selectAt(e.clientX);
+          }}
+          onPointerUp={e => { const g = gestureRef.current; if (g && (g.horizontal || Math.abs(e.clientY - g.y) < 8)) selectAt(e.clientX); gestureRef.current = null; }}
+          onPointerCancel={() => { gestureRef.current = null; }}>
           <svg viewBox={`0 0 ${g.width} ${g.height}`} className="w-full h-full" preserveAspectRatio="none" aria-hidden="true">
             {ticks.map(v => <line key={v} x1={g.left} y1={getY(v)} x2={endX} y2={getY(v)} stroke="#dfe4ea" strokeDasharray="3 5" vectorEffect="non-scaling-stroke" />)}
             {dateTicks.map(row => <line key={row.date} x1={getX(row)} y1={g.top} x2={getX(row)} y2={endY} stroke="#edf0f3" vectorEffect="non-scaling-stroke" />)}
@@ -1190,24 +1199,25 @@
           </svg>
           {ticks.map(v => <span key={v} className="absolute left-0 pr-1 text-right text-[10px] text-app-subtext pointer-events-none -translate-y-1/2" style={{ top: topPct(getY(v)), width: `${g.left / g.width * 100}%` }}>{isDD ? `${Math.round(v * 100)}%` : formatNum(v)}</span>)}
           {dateTicks.map(row => <span key={row.date} className="absolute text-[10px] text-app-subtext pointer-events-none -translate-x-1/2" style={{ top: topPct(endY + 9), left: `${getX(row) / g.width * 100}%` }}>{row.date.slice(0, 7)}</span>)}
-          <span className="absolute right-0 text-[10px] font-bold bg-white/95 px-1 rounded pointer-events-none -translate-y-1/2" style={{ top: topPct(getY(isDD ? targetDd || 0 : 100)), color: isDD ? '#f04452' : '#8B95A1' }}>{isDD ? `목표 ${formatPct1(targetDd)}` : '시작 = 100'}</span>
+          <span className="absolute right-0 text-[10px] font-bold bg-white/95 px-1 rounded pointer-events-none -translate-y-1/2" style={{ top: topPct(getY(isDD ? previewTarget || 0 : 100)), color: isDD ? '#f04452' : '#8B95A1' }}>{isDD ? `목표 ${formatPct1(previewTarget)}` : '시작 = 100'}</span>
         </div>
         {isDD && onDdPctChange && (() => {
           const snappedDisplay = Math.round(sliderDraft / 5) * 5;
           const commit = () => { if (snappedDisplay !== currentDdPct) onDdPctChange(snappedDisplay); else setSliderDraft(snappedDisplay); };
           return <div className="mt-3 bg-app-bg rounded-2xl px-4 py-4 border border-app-border">
             <div className="flex items-center justify-between mb-3"><span className="text-xs font-bold text-app-subtext">추가매수 기준선 (최고점 대비)</span><span className="text-base font-extrabold text-app-pink">{snappedDisplay}%</span></div>
-            <input aria-label="추가매수 기준 낙폭" type="range" min="-100" max="-5" step="1" value={sliderDraft} onChange={e => setSliderDraft(Number(e.target.value))} onMouseUp={commit} onTouchEnd={commit} onKeyUp={commit} className="w-full" />
+            <input aria-label="추가매수 기준 낙폭" type="range" min="-100" max="-5" step="1" value={sliderDraft} onChange={e => setSliderDraft(Number(e.target.value))} onPointerDown={e => e.currentTarget.setPointerCapture(e.pointerId)} onPointerUp={commit} onPointerCancel={() => setSliderDraft(currentDdPct)} onBlur={commit} onKeyUp={commit} className="w-full" />
             <div className="flex justify-between text-[10px] text-app-subtext mt-2"><span>-100%</span><span>-5%</span></div>
           </div>;
         })()}
-        {sel && <div className="mt-3 bg-white border border-gray-200 rounded-xl p-3 text-sm" data-testid={`chart-info-${mode}`}>
+        <div className="mt-3 min-h-[110px] bg-white border border-gray-200 rounded-xl p-3 text-sm" data-testid={`chart-info-${mode}`}>
+          {sel ? <>
           <p className="font-bold text-app-text mb-2">{sel.date} · 원본 일별 데이터</p>
           <div className="grid grid-cols-2 gap-2">
             {showUsd && <div className="bg-blue-50 rounded-lg p-2"><span className="text-xs text-app-blue font-bold">USD</span><p className="font-bold">{isDD ? formatPct(sel.usdDd) : sel.usdPrice === null ? '데이터 없음' : '$' + formatNum(sel.usdPrice)}</p></div>}
             {showKrw && <div className="bg-green-50 rounded-lg p-2"><span className="text-xs text-app-green font-bold">KRW</span><p className="font-bold">{isDD ? formatPct(sel.krwDd) : sel.krwPrice === null ? '데이터 없음' : formatKrw(sel.krwPrice)}</p></div>}
           </div>
-        </div>}
+        </> : <p className="text-sm text-app-subtext">차트를 누르거나 날짜를 입력하면 원본 정보를 표시합니다.</p>}</div>
         <p className="mt-2 text-xs text-app-subtext">터치·클릭하면 두 차트가 같은 거래일을 표시합니다.</p>
       </div>;
     }
@@ -1216,6 +1226,41 @@
     // -------------------------------------
     // Main App
     // -------------------------------------
+      function Accordion({ title, subtitle, open, onToggle, children, badge, emoji }) {
+        const containerRef = useRef(null);
+
+        function handleToggle(e) { e.preventDefault(); onToggle(); }
+
+        return (
+          <div ref={containerRef} className="bg-white rounded-3xl shadow-card mb-4 border border-app-border overflow-hidden">
+            <button
+              type="button"
+              onClick={handleToggle} aria-expanded={open}
+              className="w-full flex justify-between items-center p-5 text-left outline-none"
+            >
+              <div className="flex items-center gap-4 flex-1 min-w-0">
+                {emoji && <div className="w-12 h-12 bg-app-bg rounded-2xl flex items-center justify-center text-2xl shrink-0">{emoji}</div>}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h3 className="text-base font-bold text-app-text">{title}</h3>
+                    {badge}
+                  </div>
+                  {subtitle && <p className="text-sm text-app-subtext mt-1 truncate">{subtitle}</p>}
+                </div>
+              </div>
+              <div className={`w-8 h-8 rounded-full bg-app-bg flex items-center justify-center text-app-subtext text-xs transition-transform shrink-0 ml-2 ${open ? 'rotate-180' : ''}`}>
+                ▼
+              </div>
+            </button>
+            {open && (
+              <div className="px-6 pb-6 pt-2 border-t border-app-border mx-2">
+                {children}
+              </div>
+            )}
+          </div>
+        );
+      }
+
     function App() {
       useEffect(() => {
         window.__APP_MOUNTED__ = true;
@@ -1232,21 +1277,8 @@
       const [selectedChartDate, setSelectedChartDate] = useState(null);
 
       // 토글 시 스크롤 위치 유지 (mobile Samsung Browser 점프 방지)
-      function toggleWithScrollLock(setter, ref) {
-        return (e) => {
-          if (e && e.preventDefault) e.preventDefault();
-          const topBefore = ref && ref.current ? ref.current.getBoundingClientRect().top : 0;
-          setter(prev => !prev);
-          requestAnimationFrame(() => {
-            requestAnimationFrame(() => {
-              if (ref && ref.current) {
-                const topAfter = ref.current.getBoundingClientRect().top;
-                const delta = topAfter - topBefore;
-                if (Math.abs(delta) > 0.5) window.scrollBy({ top: delta, left: 0, behavior: 'auto' });
-              }
-            });
-          });
-        };
+      function toggleWithScrollLock(setter) {
+        return e => { if (e) e.preventDefault(); setter(prev => !prev); };
       }
 
       const verifyRef = useRef(null);
@@ -1378,12 +1410,12 @@
 
           if (usdCount === 0 && krwCount === 0) {
             configWarning = '지정된 날짜 범위에 유효한 데이터가 없습니다.';
-          } else if (settings.currencyMode !== 'BOTH' && settings.currencyMode !== settings.primarySignalMode) {
-            configWarning = '안내: Currency Mode와 Primary Signal 설정이 다릅니다.';
+          
           }
         }
 
-        const primaryEngine = settings.primarySignalMode === 'USD' ? usdEngine : krwEngine;
+        const effectiveMode = settings.currencyMode === 'BOTH' ? settings.primarySignalMode : settings.currencyMode;
+        const primaryEngine = effectiveMode === 'USD' ? usdEngine : krwEngine;
         const fearGate = (liveRating ? liveRating.rating : settings.fearGreedIndex) === 'Extreme Fear';
         const ddGate = primaryEngine ? primaryEngine.target.isTriggered : false;
         const marketGate = fearGate && ddGate;
@@ -1397,6 +1429,11 @@
           gates: { fearGate, ddGate, marketGate, finalSignal }
         };
       }, [rawData, settings, dataSource, meta, liveRating]);
+
+      useEffect(() => {
+        if (settings.currencyMode === 'USD') setChartUsd(true);
+        if (settings.currencyMode === 'KRW') setChartKrw(true);
+      }, [settings.currencyMode]);
 
       const chartModel = useMemo(() => buildChartModel(
         appState.usdEngine ? appState.usdEngine.timeSeries : null,
@@ -1414,7 +1451,8 @@
         const { name, value, type, checked } = e.target;
         setSettings((prev) => ({
           ...prev,
-          [name]: type === 'checkbox' ? checked : (type === 'number' ? Number(value) : value)
+          [name]: type === 'checkbox' ? checked : (type === 'number' ? Number(value) : value),
+          ...(name === 'currencyMode' && value !== 'BOTH' ? { primarySignalMode: value } : {})
         }));
       }
 
@@ -1523,56 +1561,6 @@
       // -------------------------------------
       // Expandable Section Component
       // -------------------------------------
-      function Accordion({ title, subtitle, open, onToggle, children, badge, emoji }) {
-        const containerRef = useRef(null);
-
-        function handleToggle(e) {
-          e.preventDefault();
-          const topBefore = containerRef.current ? containerRef.current.getBoundingClientRect().top : 0;
-          onToggle();
-          // 두 번의 rAF로 React 재렌더 후 위치 보정 (히어로/상단 점프 방지)
-          requestAnimationFrame(() => {
-            requestAnimationFrame(() => {
-              if (!containerRef.current) return;
-              const topAfter = containerRef.current.getBoundingClientRect().top;
-              const delta = topAfter - topBefore;
-              if (Math.abs(delta) > 0.5) {
-                window.scrollBy({ top: delta, left: 0, behavior: 'auto' });
-              }
-            });
-          });
-        }
-
-        return (
-          <div ref={containerRef} className="bg-white rounded-3xl shadow-card mb-4 border border-app-border overflow-hidden transition-all hover:shadow-md">
-            <button
-              type="button"
-              onClick={handleToggle}
-              className="w-full flex justify-between items-center p-5 text-left outline-none"
-            >
-              <div className="flex items-center gap-4 flex-1 min-w-0">
-                {emoji && <div className="w-12 h-12 bg-app-bg rounded-2xl flex items-center justify-center text-2xl shrink-0">{emoji}</div>}
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <h3 className="text-base font-bold text-app-text">{title}</h3>
-                    {badge}
-                  </div>
-                  {subtitle && <p className="text-sm text-app-subtext mt-1 truncate">{subtitle}</p>}
-                </div>
-              </div>
-              <div className={`w-8 h-8 rounded-full bg-app-bg flex items-center justify-center text-app-subtext text-xs transition-transform shrink-0 ml-2 ${open ? 'rotate-180' : ''}`}>
-                ▼
-              </div>
-            </button>
-            {open && (
-              <div className="px-6 pb-6 pt-2 animate-fade-in border-t border-app-border mx-2">
-                {children}
-              </div>
-            )}
-          </div>
-        );
-      }
-
       function renderDashboard() {
         const primary = appState.primaryEngine;
         const isLoading = dataSource === 'LOADING';
@@ -1600,12 +1588,12 @@
         };
 
         return (
-          <div className="space-y-4 animate-fade-in pb-20">
+          <div className="space-y-4 pb-20">
 
             {/* ============ 1단계: 히어로 ============ */}
             <div className={`rounded-[32px] p-8 md:p-12 text-center border transition-colors duration-500 shadow-sm ${heroConfig.bg}`}>
-              <div className="animate-pop-in">
-                <div className="w-20 h-20 md:w-24 md:h-24 bg-white rounded-full mx-auto mb-5 flex items-center justify-center text-4xl md:text-5xl shadow-btn animate-soft-bounce">
+              <div className="">
+                <div className="w-20 h-20 md:w-24 md:h-24 bg-white rounded-full mx-auto mb-5 flex items-center justify-center text-4xl md:text-5xl shadow-btn">
                   {heroConfig.emoji}
                 </div>
 
@@ -1745,8 +1733,9 @@
                 {/* USD/KRW 토글 */}
                 <div className="flex gap-2">
                   <button
-                    onClick={() => { if (!chartUsd && !chartKrw) return; if (chartUsd && !chartKrw) return; setChartUsd(!chartUsd); }}
-                    className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+                    disabled={!appState.usdEngine} aria-pressed={chartUsd && !!appState.usdEngine}
+                    onClick={() => { if (!chartUsd && !chartKrw) return; if (chartUsd && !(chartKrw && appState.krwEngine)) return; setChartUsd(!chartUsd); }}
+                    className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold disabled:opacity-30 disabled:cursor-not-allowed ${
                       chartUsd ? 'bg-app-blue text-white shadow-sm' : 'bg-app-bg text-app-subtext'
                     }`}
                   >
@@ -1754,8 +1743,9 @@
                     USD 달러
                   </button>
                   <button
-                    onClick={() => { if (!chartKrw && !chartUsd) return; if (chartKrw && !chartUsd) return; setChartKrw(!chartKrw); }}
-                    className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+                    disabled={!appState.krwEngine} aria-pressed={chartKrw && !!appState.krwEngine}
+                    onClick={() => { if (!chartKrw && !chartUsd) return; if (chartKrw && !(chartUsd && appState.usdEngine)) return; setChartKrw(!chartKrw); }}
+                    className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold disabled:opacity-30 disabled:cursor-not-allowed ${
                       chartKrw ? 'bg-app-green text-white shadow-sm' : 'bg-app-bg text-app-subtext'
                     }`}
                   >
@@ -1777,7 +1767,7 @@
                 </div>}
 
                 {/* 두 차트는 같은 원본 날짜와 가로축 좌표를 공유합니다. */}
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 gap-4">
                   {/* 낙폭 차트 */}
                   <div className="p-4 rounded-xl border border-gray-100 bg-gray-50">
                     <h4 className="font-bold text-app-text mb-3 text-sm">📉 최고점 대비 하락률</h4>
@@ -1785,8 +1775,8 @@
                       model={chartModel}
                       selectedDate={selectedChartDate}
                       onSelectDate={setSelectedChartDate}
-                      showUsd={chartUsd}
-                      showKrw={chartKrw}
+                      showUsd={chartUsd && !!appState.usdEngine}
+                      showKrw={chartKrw && !!appState.krwEngine}
                       mode="drawdown"
                       targetDd={Number(settings.targetDdPct) / 100}
                       currentDdPct={settings.targetDdPct}
@@ -1801,8 +1791,8 @@
                       model={chartModel}
                       selectedDate={selectedChartDate}
                       onSelectDate={setSelectedChartDate}
-                      showUsd={chartUsd}
-                      showKrw={chartKrw}
+                      showUsd={chartUsd && !!appState.usdEngine}
+                      showKrw={chartKrw && !!appState.krwEngine}
                       mode="price"
                     />
                   </div>
@@ -2177,7 +2167,7 @@
                 dataSource === 'LOADING' ? 'bg-app-border text-app-subtext' :
                 'bg-app-yellowLight text-yellow-600'
               }`}>
-                {dataSource === 'FETCHED' ? 'LIVE DATA' : dataSource === 'LOADING' ? 'LOADING' : dataSource === 'IMPORTED' ? 'IMPORTED' : 'SAMPLE'}
+                {dataSource === 'FETCHED' ? `가격 기준 ${rawData.length ? rawData[rawData.length - 1].date : '-'}` : dataSource === 'LOADING' ? 'LOADING' : dataSource === 'IMPORTED' ? 'IMPORTED' : 'SAMPLE'}
               </span>
             </header>
 
