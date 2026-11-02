@@ -151,6 +151,7 @@
   </div>
 
   <script src="./quote-tools.js?v=20261102.6"></script>
+  <script src="./indicator-tools.js?v=20261102.7"></script>
   <script type="text/babel" data-presets="react,env">
     const { useState, useMemo, useEffect, useRef } = React;
 
@@ -638,7 +639,7 @@
     // -------------------------------------
     // UI Components
     // -------------------------------------
-    const HISTORY_VERSION = '2026.11.02.6';
+    const HISTORY_VERSION = '2026.11.02.7';
 
     function HistoryMethodNote() {
       return <div className="rounded-xl bg-amber-50 p-4 text-xs leading-relaxed text-amber-800 space-y-2">
@@ -719,6 +720,26 @@
             </div>
           </details>}
       </section>;
+    }
+
+    function IndicatorPanel({ model, snapshot, source }) {
+      if (!model) return <p className="mt-4 text-xs text-app-subtext">보조지표를 계산할 가격 데이터가 없습니다.</p>;
+      const fixed = n => n === null ? '데이터 부족' : n.toFixed(1);
+      const signed = n => n === null ? '데이터 부족' : `${n >= 0 ? '+' : ''}${(n*100).toFixed(1)}%`;
+      const fx = model.fx;
+      const cards = [
+        {title:'RSI(14)', value:fixed(model.rsi), note:model.rsi === null ? '최소 15거래일의 가격이 필요합니다.' : model.rsi < 30 ? '30 미만 · 최근 하락 압력이 큰 구간' : model.rsi > 70 ? '70 초과 · 최근 상승 압력이 큰 구간' : '30~70 · 중간 구간', detail:'14거래일 Wilder 방식 · 0~100'},
+        {title:'200일 이동평균 대비', value:signed(model.distance), note:model.sma === null ? `현재 ${model.count}거래일 · 200거래일 필요` : `200일 평균 $${model.sma.toFixed(2)} · 평균보다 ${model.distance >= 0 ? '위' : '아래'}`, detail:'최근 200거래일 단순이동평균 기준'},
+        {title:'20일 변동성 위치', value:model.volPercentile === null ? '데이터 부족' : `${fixed(model.volPercentile)}백분위`, note:model.volatility === null ? '최소 21거래일의 가격이 필요합니다.' : `연환산 변동성 ${(model.volatility*100).toFixed(1)}% · ${model.volPercentile >= 80 ? '평소보다 큰 흔들림' : model.volPercentile <= 20 ? '평소보다 작은 흔들림' : '중간 수준의 흔들림'}`, detail:`${model.fullFiveYears ? '최근 5년' : '5년 미충족'} · 비교 ${model.volCount}거래일`},
+        {title:'원·달러 환율 1년 내 위치', value:fx ? `${fixed(fx.position)}%` : '데이터 없음', note:fx ? `${fx.rate.toFixed(2)}원 · 낮을수록 달러 매입 부담 감소` : '공식 환율 기록을 불러오면 표시합니다.', detail:fx ? `${fx.fullYear ? '최근 1년' : '1년 미충족'} 저점 ${fx.low.toFixed(2)} ~ 고점 ${fx.high.toFixed(2)}원` : '환율 범위 내 위치 · 저점 0%, 고점 100%'}
+      ];
+      return <div className="mt-5 border-t border-gray-100 pt-4">
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-2"><h3 className="text-sm font-bold">투자 판단 보조지표</h3><span className="text-xs text-app-subtext">가격 지표: USD 기준</span></div>
+        <p className="mb-3 text-xs text-app-subtext">{source === 'SAMPLE' ? '샘플 데이터' : source === 'IMPORTED' ? '가져온 데이터' : snapshot ? '조회 시세로 잠정 계산' : '확정 종가 기준'} · 가격 기준일 {model.date}</p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">{cards.map(card=><div key={card.title} className="min-w-0 rounded-2xl border border-gray-100 bg-gray-50 p-4"><h4 className="text-xs font-semibold text-app-text">{card.title}</h4><p className="my-2 text-2xl font-bold text-app-text">{card.value}</p><p className="text-xs leading-relaxed text-app-text">{card.note}</p><p className="mt-2 text-[11px] leading-relaxed text-app-subtext">{card.detail}</p></div>)}</div>
+        {fx && <p className="mt-3 text-[11px] leading-relaxed text-app-subtext">환율 기준일 {fx.date}{fx.live ? ` · 조회 환율${fx.readAt ? ' · 조회 시각 '+new Date(fx.readAt).toLocaleString('ko-KR',{timeZone:'Asia/Seoul'})+' KST' : ''}` : ' · 저장된 일별 환율'} · 주가와 환율의 관측 시점은 다를 수 있습니다.</p>}
+        <details className="mt-3 text-xs text-app-subtext"><summary className="cursor-pointer">지표 계산과 해석</summary><p className="mt-2 leading-relaxed">RSI는 최근 상승·하락의 상대 강도입니다. 변동성은 20개 일별 로그수익률의 표본 표준편차를 연환산(252거래일)하며, 백분위가 높을수록 비교 기간보다 흔들림이 큽니다. 환율 위치는 최근 1년 저점과 고점 사이의 위치이며 백분위와 다릅니다. 계산에는 선택한 차트 시작일 이전의 데이터도 사용합니다. 조회 시세를 반영한 값은 종가 확정 전 달라질 수 있습니다. 보조지표는 기존 2개 매수 조건의 통과 수에 포함되지 않습니다.</p></details>
+      </div>;
     }
 
     function LiveQuotePanel({ symbol, usdEngine, krwEngine, dataSource, onQuote, rawData }) {
@@ -1385,6 +1406,7 @@
       const [settings, setSettings] = useLocalStorage('mdd_settings_fixed_v1', DEFAULT_SETTINGS);
       const [reloadToken, setReloadToken] = useState(0);
       const [rawData, setRawData] = useState([]);
+      const [indicatorFxRows, setIndicatorFxRows] = useState([]);
       const [dataSource, setDataSource] = useState('LOADING');
       const [assetsList, setAssetsList] = useState(FALLBACK_ASSETS);
       const [fetchStatus, setFetchStatus] = useState({
@@ -1465,6 +1487,7 @@
 
             if (!isCancelled) {
               setRawData(merged);
+              setIndicatorFxRows(normalizeFxRows(fxData));
               setDataSource('FETCHED');
               setFetchStatus((prev) => ({ ...prev, ...nextStatus }));
             }
@@ -1563,6 +1586,18 @@
           setSelectedCase(null);
         }
       }, [screenQuote?.symbol, screenQuote?.fetchedAt, displayState.usdEngine?.quoteInfo?.fetchedAt, displayState.krwEngine?.quoteInfo?.fetchedAt]);
+
+      const indicatorState = useMemo(() => {
+        if (dataSource === 'LOADING') return {model:null,snapshot:false};
+        const rows = rawData.filter(r => r.date <= settings.endDate && isValidPositiveNumber(r.closeUsd));
+        if (!rows.length) return {model:null,snapshot:false};
+        const series = rows.map(r=>({date:r.date,price:r.closeUsd}));
+        const base = {timeSeries:series,analysisStart:series[0].date,analysisEnd:settings.endDate,metrics:{ath:Math.max(...series.map(r=>r.price))},target:{dd:settings.targetDdPct/100}};
+        const updated = QuoteTools.applySnapshot(base,dataSource === 'FETCHED' ? screenQuote : null,'USD',rawData,settings.symbol);
+        const snapshot = !!updated.quoteInfo;
+        const liveFx = snapshot && screenQuote.fx ? {rate:screenQuote.fx,date:QuoteTools.marketDate(screenQuote.sourceReadAt || screenQuote.fetchedAt),readAt:screenQuote.sourceReadAt || screenQuote.fetchedAt} : null;
+        return {model:IndicatorTools.compute(updated.timeSeries,dataSource === 'FETCHED' ? indicatorFxRows : [],liveFx),snapshot};
+      }, [rawData,indicatorFxRows,screenQuote,dataSource,settings.symbol,settings.endDate,settings.targetDdPct]);
 
       const historicalChartModel = useMemo(() => buildChartModel(
         appState.usdEngine?.timeSeries, appState.krwEngine?.timeSeries
@@ -1864,6 +1899,7 @@
                   </Badge>
                 </div>
               </div>
+              <IndicatorPanel model={indicatorState.model} snapshot={indicatorState.snapshot} source={dataSource} />
             </Accordion>
 
             {/* ============ 3단계: 현재 시장은 어떤가요? ============ */}
