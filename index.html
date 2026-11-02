@@ -479,51 +479,73 @@
       };
     }
 
-    // ============================================================
-    // 스프레드시트 방식 알고리즘
-    // - 기준: ATH 대비 고정 낙폭 (예: -10%, -20%)
-    // - 신호: 해당 낙폭 처음 하향 돌파 시 1회
-    // - 회복: 진입 시점 ATH 이상 가격 도달
-    // - 조건일: 해당 낙폭 이하에 있었던 총 일수
-    // ============================================================
-    function computeSignalStats(timeSeries, threshold) {
-      // threshold: 소수 (예: -0.20 = -20%)
-      if (!timeSeries || timeSeries.length === 0 || !Number.isFinite(threshold)) {
-        return { signalCount: 0, winCount: 0, loseCount: 0, winRate: null, daysBelow: 0 };
-      }
-
-      const totalDays = timeSeries.length;
-      // 조건일: 해당 낙폭 이하에 있었던 날 수
-      const daysBelow = timeSeries.filter(d => d.dd <= threshold).length;
-
-      const signalIndexes = [];
-      for (let i = 0; i < timeSeries.length; i++) {
-        const currDd = timeSeries[i].dd;
-        const prevDd = i > 0 ? timeSeries[i - 1].dd : null;
-        // 첫 하향 돌파만 신호 (i>0 조건으로 시작일 오탐 방지)
-        if (i > 0 && currDd <= threshold && prevDd > threshold) {
-          signalIndexes.push(i);
-        }
-      }
-
-      let winCount = 0;
-      let loseCount = 0;
-
-      signalIndexes.forEach((entryIndex) => {
-        // 회복 기준: 진입 시점의 ATH (스프레드시트 방식)
-        const entryAth = timeSeries[entryIndex].ath;
-        let recovered = false;
-        for (let j = entryIndex + 1; j < timeSeries.length; j++) {
-          if (timeSeries[j].price >= entryAth) { recovered = true; break; }
-        }
-        if (recovered) winCount += 1;
-        else loseCount += 1;
-      });
-
-      const signalCount = signalIndexes.length;
-      const winRate = signalCount > 0 ? winCount / signalCount : null;
-      return { signalCount, winCount, loseCount, winRate, daysBelow, totalDays };
+    // HISTORY_ENGINE_START: one episode per threshold until the entry ATH recovers.
+    // Dates use UTC calendar days; daysBelow counts trading observations only.
+    function calendarDaysBetween(start, end) {
+      return Math.round((Date.parse(end + 'T00:00:00Z') - Date.parse(start + 'T00:00:00Z')) / 86400000);
     }
+
+    function historyMedian(values) {
+      if (!values.length) return null;
+      const sorted = [...values].sort((a, b) => a - b);
+      const mid = Math.floor(sorted.length / 2);
+      return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+    }
+
+    function computeSignalStats(timeSeries, threshold) {
+      const rows = timeSeries || [];
+      const episodes = [];
+      let active = null;
+      const validThreshold = Number.isFinite(threshold) && threshold < 0 && threshold >= -1;
+      for (let i = 0; validThreshold && i < rows.length; i++) {
+        const row = rows[i];
+        if (active) {
+          if (row.price < active.lowPrice) {
+            active.lowPrice = row.price;
+            active.lowDate = row.date;
+          }
+          if (!active.breakevenDate && row.price >= active.entryPrice) {
+            active.breakevenDate = row.date;
+            active.breakevenDays = calendarDaysBetween(active.entryDate, row.date);
+          }
+          if (row.price >= active.entryAth) {
+            active.recoveryDate = row.date;
+            active.recoveryDays = calendarDaysBetween(active.entryDate, row.date);
+            active.status = 'RECOVERED';
+            active = null;
+          }
+        } else if (i > 0 && row.dd <= threshold && rows[i - 1].dd > threshold) {
+          active = {
+            entryDate: row.date, entryPrice: row.price, entryAth: row.ath,
+            entryDd: row.dd, lowPrice: row.price, lowDate: row.date,
+            breakevenDate: null, breakevenDays: null,
+            recoveryDate: null, recoveryDays: null, status: 'PENDING'
+          };
+          episodes.push(active);
+        }
+      }
+      const endDate = rows.length ? rows[rows.length - 1].date : null;
+      episodes.forEach((episode) => {
+        episode.additionalDd = episode.lowPrice / episode.entryPrice - 1;
+        episode.observedDays = calendarDaysBetween(episode.entryDate, endDate);
+      });
+      const completed = episodes.filter(e => e.status === 'RECOVERED');
+      // Fixed 365-day follow-up: exclude ALL younger episodes, including early recoveries.
+      const eligible = episodes.filter(e => e.observedDays >= 365);
+      const withinYear = eligible.filter(e => e.recoveryDays !== null && e.recoveryDays <= 365);
+      return {
+        signalCount: episodes.length, winCount: completed.length,
+        pendingCount: episodes.length - completed.length,
+        winRate: episodes.length ? completed.length / episodes.length : null,
+        oneYearCount: eligible.length, oneYearRecovered: withinYear.length,
+        oneYearRate: eligible.length ? withinYear.length / eligible.length : null,
+        medianRecoveryDays: historyMedian(completed.map(e => e.recoveryDays)),
+        worstAdditionalDd: episodes.length ? Math.min(...episodes.map(e => e.additionalDd)) : null,
+        daysBelow: validThreshold ? rows.filter(d => d.dd <= threshold).length : 0,
+        totalDays: rows.length, episodes
+      };
+    }
+    // HISTORY_ENGINE_END
 
     // ATH 대비 고정 낙폭 테이블 생성
     function buildFixedDdTable(timeSeries, periodMdd) {
@@ -538,7 +560,9 @@
             threshold,
             signalCount: 0,
             winCount: 0,
-            loseCount: 0,
+            pendingCount: 0,
+            oneYearCount: 0, oneYearRecovered: 0, oneYearRate: null,
+            medianRecoveryDays: null, worstAdditionalDd: null, episodes: [],
             winRate: null,
             daysBelow: 0,
             totalDays: timeSeries.length,
@@ -552,7 +576,9 @@
           threshold,
           signalCount: stats.signalCount,
           winCount: stats.winCount,
-          loseCount: stats.loseCount,
+          pendingCount: stats.pendingCount,
+          oneYearCount: stats.oneYearCount, oneYearRecovered: stats.oneYearRecovered, oneYearRate: stats.oneYearRate,
+          medianRecoveryDays: stats.medianRecoveryDays, worstAdditionalDd: stats.worstAdditionalDd,
           winRate: stats.winRate,
           daysBelow: stats.daysBelow,
           totalDays: stats.totalDays,
@@ -589,6 +615,7 @@
         analysisEnd,
         fixedDdTable,
         target: {
+          ...targetStats,
           ddPct: safeTargetDdPct,
           dd: targetDd,
           price: targetPrice,
@@ -597,7 +624,7 @@
           signalCount: targetStats.signalCount,
           winRate: targetStats.winRate,
           winCount: targetStats.winCount,
-          loseCount: targetStats.loseCount,
+          pendingCount: targetStats.pendingCount,
           daysBelow: targetStats.daysBelow,
           totalDays: targetStats.totalDays,
           belowRatio: targetStats.totalDays > 0 ? targetStats.daysBelow / targetStats.totalDays : 0
@@ -610,6 +637,88 @@
     // -------------------------------------
     // UI Components
     // -------------------------------------
+    const HISTORY_VERSION = '2026.11.02.1';
+
+    function HistoryMethodNote() {
+      return <div className="rounded-xl bg-amber-50 p-4 text-xs leading-relaxed text-amber-800 space-y-2">
+        <p>같은 하락장에서 기준선을 여러 번 오르내려도 전고점을 회복하기 전까지는 1건입니다. 기준선 첫 돌파일 종가에 매수했다고 가정합니다.</p>
+        <p>1년 내 전고점 회복률은 마지막 데이터 날짜까지 365일 이상 관찰한 사례만 계산합니다. 최근 사례는 조기 회복 여부와 관계없이 분모에서 제외합니다. 진행 중인 사례는 실패로 확정하지 않습니다.</p>
+        <p>기간은 달력일, 조건일은 거래일입니다. 회복 기간 중앙값은 회복 완료 사례만의 값이며, 진행 중 사례가 많으면 짧게 보일 수 있습니다. 과거 기록은 미래 회복을 보장하지 않습니다. 공포 지수 조건을 결합한 백테스트는 아닙니다.</p>
+      </div>;
+    }
+
+    function HistoryThresholdTable({ engine }) {
+      return <div className="space-y-2">
+        <p className="text-xs text-app-subtext">가로로 밀어 전체 항목을 확인하세요. 파란색은 설정 기준, 노란색은 현재 낙폭 구간입니다.</p>
+        <div className="overflow-x-auto rounded-xl border border-gray-100" tabIndex={0} role="region" aria-label="낙폭별 회복 통계">
+          <table className="w-full text-xs text-left whitespace-nowrap">
+            <thead className="bg-app-border text-app-subtext"><tr>
+              {['낙폭', '하락 사례', '회복 완료', '진행 중', '1년 내 전고점 회복', '회복 중앙값', '매수 후 최대 추가 하락', '조건일(거래일)'].map(h => <th key={h} className="py-3 px-3 font-semibold">{h}</th>)}
+            </tr></thead>
+            <tbody>{engine.fixedDdTable.map((r, i, all) => {
+              const isTarget = r.ddPct === engine.target.ddPct;
+              const isCurrent = !r.beyondMdd && engine.metrics.currentDd <= r.threshold &&
+                (i === all.length - 1 || engine.metrics.currentDd > all[i + 1].threshold);
+              const cls = isTarget ? 'bg-app-blueLight text-app-blue font-bold' : isCurrent ? 'bg-yellow-50 text-amber-800' : r.beyondMdd ? 'text-gray-400' : '';
+              return <tr key={r.ddPct} className={`border-b border-gray-100 ${cls}`}>
+                <td className="py-3 px-3">{r.ddPct}%</td>
+                <td className="py-3 px-3">{r.signalCount}건</td>
+                <td className="py-3 px-3">{r.winCount}건</td>
+                <td className="py-3 px-3">{r.pendingCount}건</td>
+                <td className="py-3 px-3">{r.oneYearRate === null ? '표본 없음' : `${formatPct(r.oneYearRate)} (${r.oneYearRecovered}/${r.oneYearCount}건)`}</td>
+                <td className="py-3 px-3">{r.medianRecoveryDays === null ? '—' : `${r.medianRecoveryDays}일`}</td>
+                <td className="py-3 px-3">{r.worstAdditionalDd === null ? '—' : formatPct(r.worstAdditionalDd)}</td>
+                <td className="py-3 px-3">{r.daysBelow}일</td>
+              </tr>;
+            })}</tbody>
+          </table>
+        </div>
+      </div>;
+    }
+
+    function HistoryCurrency({ engine, mode }) {
+      const s = engine.target;
+      const money = mode === 'USD' ? (v) => '$' + formatNum(v) : formatKrw;
+      const [first, last] = [engine.timeSeries[0], engine.timeSeries[engine.timeSeries.length - 1]];
+      return <section className="space-y-4 rounded-2xl border border-gray-100 p-4" aria-label={`${mode} 과거 사례`}>
+        <div>
+          <h4 className={`font-bold ${mode === 'USD' ? 'text-app-blue' : 'text-app-green'}`}>{mode === 'USD' ? '달러 기준 (USD)' : '원화 기준 (KRW)'} · {s.ddPct}% 첫 진입</h4>
+          <p className="mt-1 text-xs text-app-subtext">{first.date} ~ {last.date} · 선택 기간 내 최고가 기준</p>
+        </div>
+        <div className="grid grid-cols-2 gap-2 text-center">
+          {[
+            ['하락 사례', `${s.signalCount}건`, `전고점 회복 ${s.winCount}건 · 진행 중 ${s.pendingCount}건`],
+            ['1년 내 전고점 회복률', s.oneYearRate === null ? '표본 없음' : formatPct(s.oneYearRate), `365일 관찰 ${s.oneYearCount}건 중 ${s.oneYearRecovered}건 회복`],
+            ['전고점 회복 중앙값', s.medianRecoveryDays === null ? '—' : `${s.medianRecoveryDays}일`, `회복 완료 ${s.winCount}건만 집계`],
+            ['매수 후 최대 추가 하락', s.worstAdditionalDd === null ? '—' : formatPct(s.worstAdditionalDd), '첫 진입가 대비 · 진행 중 포함']
+          ].map(([label, value, desc]) => <div key={label} className="rounded-xl bg-gray-50 p-3">
+            <p className="text-xs font-medium text-app-subtext">{label}</p>
+            <p className="my-1 text-xl font-extrabold text-app-text">{value}</p>
+            <p className="text-[11px] leading-relaxed text-app-subtext">{desc}</p>
+          </div>)}
+        </div>
+        <p className="text-xs text-app-subtext">기간 전체 최대 낙폭(MDD): {formatPct(engine.metrics.mdd)} · 매수 후 추가 하락과 다른 지표입니다.</p>
+        {s.signalCount === 0 ? <p className="rounded-xl bg-gray-50 p-4 text-sm text-app-subtext">이 기간에는 기준선에 도달한 사례가 없습니다.</p> :
+          <details className="rounded-xl bg-gray-50 p-3">
+            <summary className="cursor-pointer text-sm font-bold">사례별 진입·저점·회복 기록 ({s.signalCount}건)</summary>
+            <p className="my-3 text-xs leading-relaxed text-app-subtext">최신 사례부터 표시합니다. 매수가 회복은 진입 다음 거래일부터 진입가 이상인 첫 종가입니다. 저점·추가 하락은 진입일부터 전고점 회복일 또는 마지막 데이터 날짜까지 관찰한 값입니다.</p>
+            <div className="overflow-x-auto" tabIndex={0} role="region" aria-label={`${mode} 사례별 기록`}>
+              <table className="w-full whitespace-nowrap text-xs text-left">
+                <thead><tr>{['진입일 / 진입가', '이후 저점 / 날짜', '추가 하락', '매수가 회복 / 기간', '전고점 회복 / 기간', '상태'].map(h => <th key={h} className="px-3 py-2 font-semibold text-app-subtext">{h}</th>)}</tr></thead>
+                <tbody>{[...s.episodes].reverse().map(e => <tr key={e.entryDate} className="border-t border-gray-200">
+                  <td className="px-3 py-3">{e.entryDate}<br />{money(e.entryPrice)}</td>
+                  <td className="px-3 py-3">{money(e.lowPrice)}<br />{e.lowDate}</td>
+                  <td className="px-3 py-3 text-app-pink font-bold">{formatPct(e.additionalDd)}</td>
+                  <td className="px-3 py-3">{e.breakevenDate || '미회복'}<br />{e.breakevenDays === null ? `${e.observedDays}일 관찰 중` : `${e.breakevenDays}일`}</td>
+                  <td className="px-3 py-3">{e.recoveryDate || '미회복'}<br />{e.recoveryDays === null ? `${e.observedDays}일 관찰 중` : `${e.recoveryDays}일`}</td>
+                  <td className={`px-3 py-3 font-bold ${e.status === 'RECOVERED' ? 'text-app-green' : 'text-amber-700'}`}>{e.status === 'RECOVERED' ? '회복 완료' : '진행 중'}</td>
+                </tr>)}</tbody>
+              </table>
+            </div>
+          </details>}
+      </section>;
+    }
+
     function Card({ title, children, className = '', titleRight = null }) {
       return (
         <div className={`bg-white rounded-3xl shadow-card p-6 md:p-8 mb-6 border border-app-border ${className}`}>
@@ -1764,101 +1873,38 @@
               </div>
             </Accordion>
 
-            {/* ============ 4단계: 과거엔 어땠나요? ============ */}
+            {/* HISTORY_UI_START */}
             <Accordion
               title="과거엔 어땠나요?"
-              subtitle={primary && primary.target.winRate !== null
-                ? `${settings.targetDdPct}% 기준, 과거 ${primary.target.signalCount}번 중 회복률 ${Math.round(primary.target.winRate * 100)}%`
-                : '과거 신호 없음'
-              }
+              subtitle={`${settings.targetDdPct}% 첫 진입 · 통화별 회복 기간과 추가 하락`}
               emoji="📈"
               open={showHistory}
               onToggle={() => setShowHistory(!showHistory)}
             >
-              {primary && (
-                <div className="space-y-4">
-                  <div className="grid grid-cols-3 gap-2 text-center">
-                    <div className="bg-gray-50 p-3 rounded-xl">
-                      <p className="text-xl md:text-2xl font-extrabold text-app-blue">{primary.target.signalCount}<span className="text-sm">번</span></p>
-                      <p className="text-[10px] md:text-xs text-app-subtext mt-1 font-medium">빠진 횟수</p>
-                    </div>
-                    <div className="bg-gray-50 p-3 rounded-xl">
-                      <p className="text-xl md:text-2xl font-extrabold text-app-green">{primary.target.winRate !== null ? Math.round(primary.target.winRate * 100) + '%' : '-'}</p>
-                      <p className="text-[10px] md:text-xs text-app-subtext mt-1 font-medium">회복 확률</p>
-                    </div>
-                    <div className="bg-gray-50 p-3 rounded-xl">
-                      <p className="text-xl md:text-2xl font-extrabold text-app-text">{Math.round(primary.metrics.mdd * 100)}%</p>
-                      <p className="text-[10px] md:text-xs text-app-subtext mt-1 font-medium">최대 낙폭</p>
-                    </div>
-                  </div>
-
-                  <div className="bg-amber-50 p-3 rounded-xl text-xs text-amber-700 font-medium">
-                    💡 "회복 확률"은 과거 기록이며 미래를 보장하지 않습니다. 기간을 바꿔가며 확인해보세요.
-                  </div>
-
-                  {/* 낙폭별 승률 테이블 (펼쳐보기) */}
-                  <div ref={detailTableRef}>
-                    <button
-                      type="button"
-                      onClick={toggleWithScrollLock(setShowDetailTable, detailTableRef)}
-                      className="w-full flex justify-between items-center p-3 bg-app-bg text-app-text rounded-xl text-sm font-bold hover:bg-app-border transition-colors"
-                    >
-                      <span>낙폭별 상세 승률</span>
-                      <span className={`text-app-subtext transition-transform ${showDetailTable ? 'rotate-180' : ''}`}>▼</span>
-                    </button>
-                  </div>
-
-                  {showDetailTable && (
-                    <div className="space-y-4 animate-fade-in">
-                      {['USD', 'KRW'].map((mode) => {
-                        const engine = mode === 'USD' ? appState.usdEngine : appState.krwEngine;
-                        if (!engine) return null;
-
-                        return (
-                          <div key={mode}>
-                            <p className="text-xs font-bold text-app-subtext mb-2">{mode === 'USD' ? '달러 기준' : '원화 기준'}</p>
-                            <div className="overflow-x-auto rounded-xl border border-gray-100">
-                              <table className="w-full text-xs text-left whitespace-nowrap">
-                                <thead className="bg-app-border text-app-subtext">
-                                  <tr>
-                                    <th className="py-2 px-3 font-semibold">낙폭</th>
-                                    <th className="py-2 px-3 font-semibold">회복률</th>
-                                    <th className="py-2 px-3 font-semibold">횟수</th>
-                                    <th className="py-2 px-3 font-semibold">조건일</th>
-                                  </tr>
-                                </thead>
-                                <tbody>
-                                  {engine.fixedDdTable.map((r, i) => {
-                                    const isTarget = r.ddPct === engine.target.ddPct;
-                                    const isCurrent = !r.beyondMdd && engine.metrics.currentDd <= r.threshold &&
-                                      (i === 0 || engine.metrics.currentDd > engine.fixedDdTable[i-1].threshold);
-                                    const rowClass = isTarget ? 'bg-app-blueLight/60' : isCurrent ? 'bg-yellow-50' : r.beyondMdd ? 'opacity-30' : '';
-                                    const textClass = isTarget ? 'font-bold text-app-blue' : isCurrent ? 'font-bold text-amber-700' : 'text-app-text';
-                                    return (
-                                      <tr key={r.ddPct} className={`border-b border-gray-50 ${rowClass}`}>
-                                        <td className={`py-2 px-3 ${textClass}`}>{r.ddPct}%</td>
-                                        <td className={`py-2 px-3 ${textClass}`}>{r.winRate !== null ? Math.round(r.winRate * 100) + '%' : '-'}</td>
-                                        <td className={`py-2 px-3 ${textClass}`}>{r.beyondMdd ? '-' : `${r.signalCount}회`}</td>
-                                        <td className={`py-2 px-3 ${textClass}`}>{r.beyondMdd ? '-' : `${r.daysBelow}일`}</td>
-                                      </tr>
-                                    );
-                                  })}
-                                </tbody>
-                              </table>
-                            </div>
-                          </div>
-                        );
-                      })}
-                      <div className="text-[10px] text-app-subtext space-y-0.5">
-                        <p>• 파란색: 설정된 기준 낙폭 / 노란색: 현재 낙폭 구간</p>
-                        <p>• 회복률: 해당 낙폭 돌파 후 최고점까지 다시 올라온 비율</p>
-                        <p>• 흐린 행: 이 기간에 도달한 적 없는 구간</p>
-                      </div>
-                    </div>
-                  )}
+              <div className="space-y-4">
+                {dataSource === 'SAMPLE' && <p className="rounded-xl bg-red-50 p-3 text-sm font-bold text-red-600">샘플 데이터입니다. 실제 과거 투자 기록이 아닙니다.</p>}
+                {['USD', 'KRW'].map(mode => {
+                  const engine = mode === 'USD' ? appState.usdEngine : appState.krwEngine;
+                  return engine ? <HistoryCurrency key={mode} engine={engine} mode={mode} /> : null;
+                })}
+                <HistoryMethodNote />
+                <div ref={detailTableRef}>
+                  <button type="button" aria-expanded={showDetailTable}
+                    onClick={toggleWithScrollLock(setShowDetailTable, detailTableRef)}
+                    className="w-full flex justify-between items-center p-3 bg-app-bg text-app-text rounded-xl text-sm font-bold">
+                    <span>낙폭별 상세 통계</span><span>{showDetailTable ? '▲' : '▼'}</span>
+                  </button>
                 </div>
-              )}
+                {showDetailTable && ['USD', 'KRW'].map(mode => {
+                  const engine = mode === 'USD' ? appState.usdEngine : appState.krwEngine;
+                  return engine ? <div key={mode} className="space-y-2">
+                    <p className="text-sm font-bold text-app-text">{mode === 'USD' ? '달러 기준 (USD)' : '원화 기준 (KRW)'}</p>
+                    <HistoryThresholdTable engine={engine} />
+                  </div> : null;
+                })}
+              </div>
             </Accordion>
+            {/* HISTORY_UI_END */}
 
           </div>
         );
@@ -1866,69 +1912,19 @@
 
       function renderDetail() {
         if (!appState.usdEngine && !appState.krwEngine) {
-          return (
-            <Card>
-              <div className="py-12 text-center text-app-subtext flex flex-col items-center font-medium">
-                {appState.configWarning || '설정(Settings) 탭에서 날짜 범위나 모드를 확인해주세요.'}
-              </div>
-            </Card>
-          );
+          return <Card><p className="py-8 text-sm text-app-subtext">{appState.configWarning || '선택 기간에 유효한 데이터가 없습니다.'}</p></Card>;
         }
-
-        return (
-          <div className="space-y-6 animate-fade-in pb-10">
-            {['USD', 'KRW'].map((mode) => {
-              const engine = mode === 'USD' ? appState.usdEngine : appState.krwEngine;
-              if (!engine) return null;
-
-              const isTargetRow = (r) => r.ddPct === engine.target.ddPct;
-              const isCurrentRow = (r) => !r.beyondMdd && engine.metrics.currentDd <= r.threshold &&
-                (r.ddPct === -5 || engine.metrics.currentDd > (r.ddPct + 5) / 100);
-
-              return (
-                <Card key={mode} title={mode === 'USD' ? '달러 기준 낙폭별 회복 승률' : '원화 기준 낙폭별 회복 승률'}>
-                  <div className="overflow-x-auto -mx-5 md:mx-0">
-                    <table className="w-full text-sm text-left whitespace-nowrap">
-                      <thead className="bg-app-border text-app-subtext border-b border-gray-200">
-                        <tr>
-                          <th className="py-3 px-4 font-semibold">낙폭</th>
-                          <th className="py-3 px-4 font-semibold">회복률</th>
-                          <th className="py-3 px-4 font-semibold">신호 수</th>
-                          <th className="py-3 px-4 font-semibold">조건일</th>
-                          <th className="py-3 px-4 font-semibold">비중</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {engine.fixedDdTable.map((r, i) => {
-                          const isTarget = r.ddPct === engine.target.ddPct;
-                          const isCurrent = !r.beyondMdd && engine.metrics.currentDd <= r.threshold &&
-                            (i === 0 || engine.metrics.currentDd > engine.fixedDdTable[i-1].threshold);
-                          const rowClass = isTarget ? 'bg-app-blueLight/60' : isCurrent ? 'bg-yellow-50' : r.beyondMdd ? 'opacity-30' : '';
-                          const textClass = isTarget ? 'font-bold text-app-blue' : isCurrent ? 'font-bold text-amber-700' : 'text-app-text';
-                          return (
-                            <tr key={r.ddPct} className={`border-b border-gray-100 hover:bg-gray-50 transition-colors ${rowClass}`}>
-                              <td className={`py-3 px-4 ${textClass}`}>{r.ddPct}%</td>
-                              <td className={`py-3 px-4 ${textClass}`}>{r.winRate !== null ? formatPct(r.winRate) : '-'}</td>
-                              <td className={`py-3 px-4 ${textClass}`}>{r.beyondMdd ? '-' : `${r.signalCount}회`}</td>
-                              <td className={`py-3 px-4 ${textClass}`}>{r.beyondMdd ? '-' : `${r.daysBelow}일`}</td>
-                              <td className={`py-3 px-4 ${textClass}`}>{r.beyondMdd ? '-' : `${(r.belowRatio*100).toFixed(1)}%`}</td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                  <div className="mt-4 text-xs text-app-subtext space-y-1">
-                    <p>• 파란색: 현재 설정된 기준 낙폭 / 노란색: 현재 낙폭이 속한 구간</p>
-                    <p>• 회복률: 해당 낙폭을 처음 돌파한 뒤 역대 최고가 이상으로 회복된 비율</p>
-                    <p>• 조건일: 해당 낙폭 이하에 머문 총 일수 / 비중: 전체 기간 대비 조건일 비율</p>
-                    <p>• 흐리게 표시된 행: 분석 기간 중 실제로 도달한 적 없는 구간</p>
-                  </div>
-                </Card>
-              );
-            })}
-          </div>
-        );
+        return <div className="space-y-6 pb-10 animate-fade-in">
+          {dataSource === 'SAMPLE' && <p className="rounded-xl bg-red-50 p-3 text-sm font-bold text-red-600">샘플 데이터입니다. 실제 과거 투자 기록이 아닙니다.</p>}
+          <HistoryMethodNote />
+          {['USD', 'KRW'].map(mode => {
+            const engine = mode === 'USD' ? appState.usdEngine : appState.krwEngine;
+            return engine ? <Card key={mode} title={mode === 'USD' ? '달러 기준 낙폭별 회복 통계' : '원화 기준 낙폭별 회복 통계'}>
+              <p className="mb-3 text-xs text-app-subtext">{engine.timeSeries[0].date} ~ {engine.timeSeries[engine.timeSeries.length - 1].date}</p>
+              <HistoryThresholdTable engine={engine} />
+            </Card> : null;
+          })}
+        </div>;
       }
 
       function renderSettings() {
@@ -2150,7 +2146,7 @@
             <Card title="1. 이 앱이 하는 일">
               <ul className="space-y-2 text-sm text-app-text font-medium">
                 <li className="flex items-start"><span className="text-app-blue mr-2">•</span> 선택한 기간 동안 가격이 역대 최고점에서 얼마나 떨어졌는지(낙폭)를 추적합니다.</li>
-                <li className="flex items-start"><span className="text-app-blue mr-2">•</span> "이 정도 빠지면 추가매수하겠다"는 기준선을 정하고, 과거에 그 기준에서 샀다면 결과가 어땠을지 승률로 보여줍니다.</li>
+                <li className="flex items-start"><span className="text-app-blue mr-2">•</span> "이 정도 빠지면 추가매수하겠다"는 기준선을 정하고, 과거에 그 기준에서 샀다면 이후 추가 하락과 회복에 걸린 시간을 보여줍니다.</li>
                 <li className="flex items-start"><span className="text-app-blue mr-2">•</span> 공포 지수와 생활 여건까지 함께 체크해서 지금이 실행할 만한 타이밍인지 알려줍니다.</li>
               </ul>
             </Card>
@@ -2160,7 +2156,7 @@
                 {[
                   { title: '최대 낙폭 (MDD)', desc: '선택한 기간에서 역대 최고점 대비 가장 깊이 빠진 폭입니다. "이 기간에 최악일 때 얼마나 떨어졌나?"라고 생각하면 됩니다.' },
                   { title: '기준선', desc: '추가매수를 고려할 낙폭입니다. 예: -20%로 설정하면 최고점 대비 20% 빠졌을 때 매수 신호가 켜집니다.' },
-                  { title: '회복 승률', desc: '과거에 기준선까지 떨어졌을 때 매수했다면, 이후 최고점까지 다시 올라온 비율입니다.' },
+                  { title: '1년 내 전고점 회복률', desc: '365일 이상 관찰한 하락 사례 중 첫 진입일부터 365일 안에 당시 전고점으로 회복한 비율입니다. 미래 확률을 뜻하지 않습니다.' },
                   { title: '공포 지수', desc: '시장이 얼마나 겁먹었는지 나타내는 지표입니다. "극단적 공포"일 때가 역사적으로 좋은 매수 기회인 경우가 많았습니다.' }
                 ].map(({ title, desc }) => (
                   <div key={title} className="bg-gray-50 p-4 rounded-xl">
@@ -2171,11 +2167,11 @@
               </div>
             </Card>
 
-            <Card title="3. 승률은 이렇게 계산됩니다">
+            <Card title="3. 과거 사례는 이렇게 계산됩니다">
               <ul className="space-y-2 text-sm text-app-text font-medium">
-                <li className="flex items-start"><span className="text-app-blue mr-2">•</span> 가격이 기준선 아래로 처음 내려간 날을 "매수 신호"로 잡습니다.</li>
-                <li className="flex items-start"><span className="text-app-blue mr-2">•</span> 그 뒤 가격이 역대 최고점 이상으로 회복되면 "승리", 안 되면 "패배"입니다.</li>
-                <li className="flex items-start"><span className="text-amber-600 mr-2">⚠</span> 최근 신호는 아직 회복할 시간이 부족해서 승률이 낮게 나올 수 있습니다.</li>
+                <li className="flex items-start"><span className="text-app-blue mr-2">•</span> 선택 기간 내 최고가 대비 기준선을 처음 돌파한 날의 종가를 진입가로 잡습니다. 갭 하락 시 설정한 가격과 다를 수 있습니다.</li>
+                <li className="flex items-start"><span className="text-app-blue mr-2">•</span> 진입 당시 전고점을 회복하기 전까지 같은 하락장은 1건입니다. 전고점 회복 완료와 진행 중을 구분하며, 매수가 회복은 따로 표시합니다.</li>
+                <li className="flex items-start"><span className="text-amber-600 mr-2">⚠</span> 1년 내 회복률은 365일 이상 관찰한 사례만 집계합니다. 회복 중앙값은 회복 완료 사례만 사용하며, 추가 하락은 진입가 대비 저점의 하락폭입니다.</li>
                 <li className="flex items-start"><span className="text-app-blue mr-2">•</span> 차트의 붉은 음영 구간이 "기준선 아래" 구간입니다.</li>
               </ul>
             </Card>
@@ -2194,7 +2190,7 @@
                   '분석할 자산(예: SPY)과 기간을 선택합니다.',
                   '추가매수 기준 낙폭을 설정합니다. 예: -20% = 최고점 대비 20% 빠졌을 때.',
                   '대시보드에서 현재 낙폭과 기준선을 비교합니다.',
-                  '"낙폭별 승률" 탭에서 다양한 기준의 과거 승률을 확인합니다.',
+                  '"회복 통계" 탭에서 다양한 기준의 과거 승률을 확인합니다.',
                   '생활 조건과 시장 조건을 함께 보고 실행 여부를 판단합니다.'
                 ].map((step, i) => (
                   <li key={i} className="flex items-center">
@@ -2225,7 +2221,7 @@
             <nav className="flex space-x-2 mb-6 bg-white p-1.5 rounded-2xl border border-app-border shadow-sm">
               {[
                 { id: 'dashboard', label: '대시보드' },
-                { id: 'detail', label: '승률표' },
+                { id: 'detail', label: '회복 통계' },
                 { id: 'settings', label: '설정' },
                 { id: 'guide', label: '가이드' }
               ].map((tab) => (
@@ -2247,6 +2243,7 @@
               {activeTab === 'settings' && renderSettings()}
               {activeTab === 'guide' && renderGuide()}
             </main>
+            <p className="pb-4 text-center text-[10px] text-app-subtext">v{HISTORY_VERSION}</p>
           </div>
         </div>
       );
@@ -2261,3 +2258,4 @@
   </script>
 </body>
 </html>
+
