@@ -45,6 +45,32 @@
       targetPrice: engine.target.price };
   }
   let sequence = 0;
+  function marketDate(value) {
+    return new Intl.DateTimeFormat('en-CA', {timeZone:'America/New_York',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(value));
+  }
+  function applySnapshot(engine, quote, mode, rawData, expectedSymbol) {
+    if (!engine || !quote || !engine.timeSeries.length || (expectedSymbol && quote.symbol !== expectedSymbol)) return engine;
+    const date = marketDate(quote.tradeAt);
+    const last = engine.timeSeries[engine.timeSeries.length - 1];
+    if (date < last.date || date > (engine.analysisEnd || '9999-12-31') || date < (engine.analysisStart || '0000-01-01')) return engine;
+    if (Date.parse(date) - Date.parse(last.date) > 7 * 86400000) return engine;
+    const reference = mode === 'USD' ? last.price : (rawData || []).find(r => r.date === last.date)?.closeUsd;
+    const anchor = date === last.date ? quote.price : quote.previousClose;
+    if (!(reference > 0) || !(anchor > 0) || Math.abs(anchor / reference - 1) > .005) return engine;
+    const price = mode === 'USD' ? quote.price : quote.fx ? Math.round(quote.price * quote.fx * 100) / 100 : null;
+    if (!(price > 0)) return engine;
+    // Ephemeral display copy only. Never pass this series into historical recovery calculations.
+    const ath = Math.max(engine.metrics.ath, price);
+    const dd = price / ath - 1;
+    const point = {date,price,ath,dd,snapshot:true};
+    const rows = date === last.date ? [...engine.timeSeries.slice(0,-1),point] : [...engine.timeSeries,point];
+    const targetPrice = ath * (1 + engine.target.dd);
+    return {...engine, timeSeries:rows,
+      quoteInfo:{tradeAt:quote.tradeAt,fetchedAt:quote.fetchedAt,sourceReadAt:quote.sourceReadAt,derivedFx:mode==='KRW'},
+      metrics:{...engine.metrics,ath,currentPrice:price,currentDd:dd},
+      target:{...engine.target,price:targetPrice,isTriggered:dd<=engine.target.dd,
+        gapToTarget:targetPrice>0 ? price/targetPrice-1 : null}};
+  }
   function request(endpoint) {
     let script, timer, callback, rejectPromise, settled = false;
     function clean() { clearTimeout(timer); if (script) script.remove(); if (callback) delete root[callback]; }
@@ -65,7 +91,7 @@
     });
     return { promise, cancel: () => fail(new Error('조회 취소')) };
   }
-  const api = { endpointUrl, normalize, compareWithClose, request };
+  const api = { endpointUrl, normalize, compareWithClose, marketDate, applySnapshot, request };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.QuoteTools = api;
 })(typeof window === 'undefined' ? globalThis : window);

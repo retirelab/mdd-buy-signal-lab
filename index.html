@@ -150,7 +150,7 @@
     </div>
   </div>
 
-  <script src="./quote-tools.js"></script>
+  <script src="./quote-tools.js?v=20261102.6"></script>
   <script type="text/babel" data-presets="react,env">
     const { useState, useMemo, useEffect, useRef } = React;
 
@@ -638,7 +638,7 @@
     // -------------------------------------
     // UI Components
     // -------------------------------------
-    const HISTORY_VERSION = '2026.11.02.5';
+    const HISTORY_VERSION = '2026.11.02.6';
 
     function HistoryMethodNote() {
       return <div className="rounded-xl bg-amber-50 p-4 text-xs leading-relaxed text-amber-800 space-y-2">
@@ -721,7 +721,7 @@
       </section>;
     }
 
-    function LiveQuotePanel({ symbol, usdEngine, krwEngine, dataSource }) {
+    function LiveQuotePanel({ symbol, usdEngine, krwEngine, dataSource, onQuote, rawData }) {
       const [endpoint, setEndpoint] = useLocalStorage('retirelab_google_quote_endpoint_v1', '');
       const [draft, setDraft] = useState(endpoint);
       const [quote, setQuote] = useState(null);
@@ -740,17 +740,18 @@
         try {
           const payload = await request.promise;
           const next = QuoteTools.normalize(payload, symbol);
-          if (id === requestNumber.current) { setQuote(next); setClock(Date.now()); }
+          if (id === requestNumber.current) { setQuote(next); setClock(Date.now()); onQuote(next); }
         } catch (e) { if (id === requestNumber.current) setError(e.message || '시세 조회 실패'); }
         finally { if (id === requestNumber.current) setBusy(false); }
       }
       useEffect(() => {
-        setQuote(null); setError(''); refresh();
+        setQuote(null); onQuote(null); setError(''); refresh();
         return () => { requestNumber.current++; currentRequest.current?.cancel(); };
       }, [endpoint, symbol]);
       useEffect(() => { const timer = setInterval(() => setClock(Date.now()), 30000); return () => clearInterval(timer); }, []);
       const age = quote ? Math.max(0, (clock - Date.parse(quote.tradeAt)) / 60000) : null;
-      const comparison = quote && dataSource === 'FETCHED' ? QuoteTools.compareWithClose(quote, usdEngine, 'USD', clock) : null;
+      const applied = quote && dataSource === 'FETCHED' ? QuoteTools.applySnapshot(usdEngine, quote, 'USD', rawData, symbol) : null;
+      const comparison = applied?.quoteInfo ? {dd:applied.metrics.currentDd, reached:applied.target.isTriggered, targetPrice:applied.target.price, remaining:applied.target.price / quote.price - 1} : null;
       const stamp = value => value ? new Date(value).toLocaleString('ko-KR', {timeZone:'Asia/Seoul',hour12:false}) + ' KST' : '확인 불가';
       return <Card title={`${symbol} 현재 제공 시세`} titleRight={<button type="button" disabled={busy || !endpoint} onClick={refresh} className="rounded-xl bg-app-blue px-3 py-2 text-xs font-bold text-white disabled:opacity-40">{busy ? '조회 중…' : '현재가 새로고침'}</button>}>
         <div className={endpoint ? "min-h-[280px] space-y-3" : "space-y-3"} aria-live="polite">
@@ -763,12 +764,12 @@
             </div>
             <p className="text-xs leading-relaxed text-app-subtext">거래 시각: {stamp(quote.tradeAt)}<br />앱 조회: {stamp(quote.fetchedAt)} · 제공 지연: {quote.delayMinutes === null ? '확인 불가' : `${quote.delayMinutes}분`}<br />Google Finance는 최대 20분 지연될 수 있습니다. 새로고침은 Google 원천 시세의 즉시 갱신을 보장하지 않습니다.</p>
             {comparison ? <p className="rounded-xl bg-gray-50 p-3 text-sm">달러 종가 최고가 대비 장중 참고 하락: <b>{formatPct(comparison.dd)}</b><br />{comparison.reached ? '설정한 종가 기준 가격에 도달했습니다.' : `종가 기준 목표 $${formatNum(comparison.targetPrice)}까지 현재 제공 가격에서 추가 ${formatPct(Math.min(0, comparison.remaining))} 필요`}</p>
-              : <p className="text-xs text-app-subtext">장중 낙폭 비교 보류: 시세의 거래 시각과 최근 종가의 가격 기준이 일치하는지 확인해야 합니다.</p>}
+              : <p className="text-xs text-app-subtext">이 분석 기간에는 조회 시세를 적용할 수 없거나 종가와 가격 기준이 다릅니다. 해당 영역은 종가 기준으로 유지합니다.</p>}
             {error && <p className="text-xs text-amber-700">이번 갱신 실패 · 위 가격은 직전 조회값입니다.</p>}
           </>}
           {error && <p role="status" className="text-xs text-red-600">{error}</p>}
         </div>
-        <p className="mt-3 text-xs leading-relaxed text-app-subtext">현재 상태 진단·과거 차트·회복 통계는 확정 종가 기준입니다. 이 시세는 화면에서 참고하며 종가 기록에 저장하지 않습니다. 원화 환산액은 주가와 환율의 관측 시각이 다를 수 있습니다.</p>
+        <p className="mt-3 text-xs leading-relaxed text-app-subtext">조회 시세는 현재가·현재 낙폭·매수 조건·차트의 마지막 지점에 반영합니다. 종가 파일과 과거 회복 통계는 변경하지 않습니다. 장 마감 후에는 최근 거래일 가격이 표시되며, 원화 환산액은 주가와 환율의 관측 시각이 다를 수 있습니다.</p>
         <details className="mt-4 rounded-xl border border-gray-100 p-3">
           <summary className="cursor-pointer text-sm font-bold">시세 연결 설정</summary>
           <p className="my-3 text-xs text-app-subtext">계좌 정보가 없는 시세 전용 Apps Script 웹앱 주소를 등록하세요. 주소는 이 브라우저에 저장됩니다.</p>
@@ -1149,6 +1150,7 @@
           date, timestamp: Date.parse(date + 'T00:00:00Z'),
           usdPrice: u ? u.price : null, krwPrice: k ? k.price : null,
           usdDd: u ? u.dd : null, krwDd: k ? k.dd : null,
+          snapshot: !!(u?.snapshot || k?.snapshot), usdSnapshot: !!u?.snapshot, krwSnapshot: !!k?.snapshot,
           usdIndex: u && usdBase > 0 ? u.price / usdBase * 100 : null,
           krwIndex: k && krwBase > 0 ? k.price / krwBase * 100 : null
         };
@@ -1270,6 +1272,13 @@
             {yTarget !== null && <line x1={g.left} y1={yTarget} x2={endX} y2={yTarget} stroke="#f04452" strokeDasharray="6 5" vectorEffect="non-scaling-stroke" />}
             {showUsd && <path data-series="USD" d={usdPath.line} fill="none" stroke="#3182f6" strokeWidth="2" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />}
             {showKrw && <path data-series="KRW" d={krwPath.line} fill="none" stroke="#20c997" strokeWidth="2" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />}
+            {(() => {
+              const last = model.rows[model.rows.length - 1];
+              return <>
+                {showUsd && last.usdSnapshot && Number.isFinite(last[usdKey]) && <circle data-quote-point="USD" cx={getX(last)} cy={getY(last[usdKey])} r="6" fill="#3182f6" stroke="white" strokeWidth="1.5" />}
+                {showKrw && last.krwSnapshot && Number.isFinite(last[krwKey]) && <circle data-quote-point="KRW" cx={getX(last)} cy={getY(last[krwKey])} r="6" fill="#20c997" stroke="white" strokeWidth="1.5" />}
+              </>;
+            })()}
             {markers.map(m => {
               const row = model.byDate.get(m.date);
               const key = episodeMode === 'KRW' ? krwKey : usdKey;
@@ -1300,10 +1309,10 @@
         })()}
         <div className="mt-3 min-h-[110px] bg-white border border-gray-200 rounded-xl p-3 text-sm" data-testid={`chart-info-${mode}`}>
           {sel ? <>
-          <p className="font-bold text-app-text mb-2">{sel.date} · 원본 일별 데이터</p>
+          <p className="font-bold text-app-text mb-2">{sel.date} · {sel.snapshot ? '조회 시세 반영 · 저장 안 함' : '원본 일별 데이터'}</p>
           <div className="grid grid-cols-2 gap-2">
-            {showUsd && <div className="bg-blue-50 rounded-lg p-2"><span className="text-xs text-app-blue font-bold">USD</span><p className="font-bold">{isDD ? formatPct(sel.usdDd) : sel.usdPrice === null ? '데이터 없음' : '$' + formatNum(sel.usdPrice)}</p></div>}
-            {showKrw && <div className="bg-green-50 rounded-lg p-2"><span className="text-xs text-app-green font-bold">KRW</span><p className="font-bold">{isDD ? formatPct(sel.krwDd) : sel.krwPrice === null ? '데이터 없음' : formatKrw(sel.krwPrice)}</p></div>}
+            {showUsd && <div className="bg-blue-50 rounded-lg p-2"><span className="text-xs text-app-blue font-bold">USD · {sel.usdSnapshot ? '조회' : '종가'}</span><p className="font-bold">{isDD ? formatPct(sel.usdDd) : sel.usdPrice === null ? '데이터 없음' : '$' + formatNum(sel.usdPrice)}</p></div>}
+            {showKrw && <div className="bg-green-50 rounded-lg p-2"><span className="text-xs text-app-green font-bold">KRW · {sel.krwSnapshot ? '조회 환산' : '종가'}</span><p className="font-bold">{isDD ? formatPct(sel.krwDd) : sel.krwPrice === null ? '데이터 없음' : formatKrw(sel.krwPrice)}</p></div>}
           </div>
         </> : <p className="text-sm text-app-subtext">차트를 누르거나 날짜를 입력하면 원본 정보를 표시합니다.</p>}</div>
         <p className="mt-2 text-xs text-app-subtext">터치·클릭하면 두 차트가 같은 거래일을 표시합니다.</p>
@@ -1386,6 +1395,7 @@
         error: null
       });
       const [liveRating, setLiveRating] = useState(null);
+      const [screenQuote, setScreenQuote] = useState(null);
       const [fallbackSampleData] = useState(() => generateSampleData('SPY'));
       const fileInputRef = useRef(null);
 
@@ -1536,16 +1546,38 @@
         if (settings.currencyMode === 'KRW') setChartKrw(true);
       }, [settings.currencyMode]);
 
+      const displayState = useMemo(() => {
+        const q = dataSource === 'FETCHED' && screenQuote?.symbol === settings.symbol ? screenQuote : null;
+        const usdEngine = QuoteTools.applySnapshot(appState.usdEngine,q,'USD',rawData,settings.symbol);
+        const krwEngine = QuoteTools.applySnapshot(appState.krwEngine,q,'KRW',rawData,settings.symbol);
+        const primaryMode = settings.currencyMode === 'BOTH' ? settings.primarySignalMode : settings.currencyMode;
+        const primaryEngine = primaryMode === 'USD' ? usdEngine : krwEngine;
+        const ddGate = !!primaryEngine?.target.isTriggered;
+        const marketGate = appState.gates.fearGate && ddGate;
+        return {...appState,usdEngine,krwEngine,primaryEngine,gates:{...appState.gates,ddGate,marketGate,finalSignal:marketGate}};
+      }, [appState,screenQuote,settings.symbol,settings.currencyMode,settings.primarySignalMode,rawData,dataSource]);
+
+      useEffect(() => {
+        if (screenQuote && (displayState.usdEngine?.quoteInfo || displayState.krwEngine?.quoteInfo)) {
+          setSelectedChartDate(QuoteTools.marketDate(screenQuote.tradeAt));
+          setSelectedCase(null);
+        }
+      }, [screenQuote?.symbol, screenQuote?.fetchedAt, displayState.usdEngine?.quoteInfo?.fetchedAt, displayState.krwEngine?.quoteInfo?.fetchedAt]);
+
+      const historicalChartModel = useMemo(() => buildChartModel(
+        appState.usdEngine?.timeSeries, appState.krwEngine?.timeSeries
+      ), [appState.usdEngine?.timeSeries,appState.krwEngine?.timeSeries]);
+
       const chartModel = useMemo(() => buildChartModel(
-        appState.usdEngine ? appState.usdEngine.timeSeries : null,
-        appState.krwEngine ? appState.krwEngine.timeSeries : null
-      ), [appState.usdEngine?.timeSeries, appState.krwEngine?.timeSeries]);
+        displayState.usdEngine ? displayState.usdEngine.timeSeries : null,
+        displayState.krwEngine ? displayState.krwEngine.timeSeries : null
+      ), [displayState.usdEngine?.timeSeries, displayState.krwEngine?.timeSeries]);
 
       useEffect(() => { setSelectedChartDate(null); }, [settings.symbol, settings.startDate, settings.endDate, settings.currencyMode]);
 
       const activeEpisode = selectedCase
         ? (selectedCase.mode === 'USD' ? appState.usdEngine : appState.krwEngine)?.target.episodes.find(e => e.entryDate === selectedCase.entryDate) : null;
-      const episodeView = useMemo(() => buildEpisodeView(chartModel, activeEpisode), [chartModel, activeEpisode]);
+      const episodeView = useMemo(() => activeEpisode ? buildEpisodeView(historicalChartModel, activeEpisode) : {model:chartModel,markers:[]}, [chartModel,historicalChartModel,activeEpisode]);
       useEffect(() => { setSelectedCase(null); }, [settings.symbol, settings.startDate, settings.endDate, settings.currencyMode, settings.targetDdPct, rawData]);
       useEffect(() => {
         if (!selectedCase) return;
@@ -1677,12 +1709,12 @@
       // Expandable Section Component
       // -------------------------------------
       function renderDashboard() {
-        const primary = appState.primaryEngine;
+        const primary = displayState.primaryEngine;
         const isLoading = dataSource === 'LOADING';
         const krwAutoAdjusted = meta.krwAnalysisStart && settings.startDate && meta.krwAnalysisStart > settings.startDate;
 
-        const signal = appState.gates.finalSignal;
-        const passCount = [appState.gates.fearGate, appState.gates.ddGate].filter(Boolean).length;
+        const signal = displayState.gates.finalSignal;
+        const passCount = [displayState.gates.fearGate, displayState.gates.ddGate].filter(Boolean).length;
 
         // 히어로 상태 구성
         const heroConfig = isLoading ? {
@@ -1724,19 +1756,19 @@
                   <div className="flex justify-center gap-6 mt-8">
                     <div className="flex flex-col items-center gap-2">
                       <div className={`w-12 h-12 rounded-2xl flex items-center justify-center text-lg font-bold transition-all ${
-                        appState.gates.fearGate ? 'bg-app-green text-white shadow-md' : 'bg-white text-gray-300 border border-gray-100'
+                        displayState.gates.fearGate ? 'bg-app-green text-white shadow-md' : 'bg-white text-gray-300 border border-gray-100'
                       }`}>
-                        {appState.gates.fearGate ? '✓' : '—'}
+                        {displayState.gates.fearGate ? '✓' : '—'}
                       </div>
-                      <span className={`text-xs font-bold ${appState.gates.fearGate ? 'text-app-green' : 'text-app-subtext'}`}>공포 지수</span>
+                      <span className={`text-xs font-bold ${displayState.gates.fearGate ? 'text-app-green' : 'text-app-subtext'}`}>공포 지수</span>
                     </div>
                     <div className="flex flex-col items-center gap-2">
                       <div className={`w-12 h-12 rounded-2xl flex items-center justify-center text-lg font-bold transition-all ${
-                        appState.gates.ddGate ? 'bg-app-pink text-white shadow-md' : 'bg-white text-gray-300 border border-gray-100'
+                        displayState.gates.ddGate ? 'bg-app-pink text-white shadow-md' : 'bg-white text-gray-300 border border-gray-100'
                       }`}>
-                        {appState.gates.ddGate ? '✓' : '—'}
+                        {displayState.gates.ddGate ? '✓' : '—'}
                       </div>
-                      <span className={`text-xs font-bold ${appState.gates.ddGate ? 'text-app-pink' : 'text-app-subtext'}`}>가격 하락</span>
+                      <span className={`text-xs font-bold ${displayState.gates.ddGate ? 'text-app-pink' : 'text-app-subtext'}`}>가격 하락</span>
                     </div>
                   </div>
                 )}
@@ -1801,12 +1833,12 @@
               </div>
             )}
 
-            <LiveQuotePanel symbol={settings.symbol} usdEngine={appState.usdEngine} krwEngine={appState.krwEngine} dataSource={dataSource} />
+            <LiveQuotePanel symbol={settings.symbol} usdEngine={appState.usdEngine} krwEngine={appState.krwEngine} dataSource={dataSource} onQuote={setScreenQuote} rawData={rawData} />
 
             {/* ============ 2단계: 왜 이런 판단인가요? ============ */}
             <Accordion
               title="현재 상태 진단"
-              subtitle="시장 공포 + 가격 하락을 체크합니다"
+              subtitle={displayState.primaryEngine?.quoteInfo ? "조회 시세 반영 · 시장 공포 + 가격 하락" : "종가 기준 · 시장 공포 + 가격 하락"}
               emoji="🔍"
               open={showWhy}
               onToggle={() => setShowWhy(!showWhy)}
@@ -1818,7 +1850,7 @@
                     <span className="text-sm font-medium text-app-text">시장 공포 지수</span>
                     <p className="text-xs text-app-subtext mt-0.5">"극단적 공포"일 때 통과</p>
                   </div>
-                  <Badge active={appState.gates.fearGate} color={appState.gates.fearGate ? 'green' : 'red'}>
+                  <Badge active={displayState.gates.fearGate} color={displayState.gates.fearGate ? 'green' : 'red'}>
                     {liveRating ? `${liveRating.rating} (${liveRating.score})` : settings.fearGreedIndex}
                   </Badge>
                 </div>
@@ -1827,7 +1859,7 @@
                     <span className="text-sm font-medium text-app-text">가격 하락폭</span>
                     <p className="text-xs text-app-subtext mt-0.5">최고점 대비 {settings.targetDdPct}% 이상 빠지면 통과</p>
                   </div>
-                  <Badge active={appState.gates.ddGate} color={appState.gates.ddGate ? 'green' : 'red'}>
+                  <Badge active={displayState.gates.ddGate} color={displayState.gates.ddGate ? 'green' : 'red'}>
                     {primary ? `현재 ${formatPct1(primary.metrics.currentDd)}` : '-'}
                   </Badge>
                 </div>
@@ -1844,6 +1876,7 @@
               onToggle={() => setShowChart(!showChart)}
             >
               <div className="space-y-4">
+                {(displayState.usdEngine?.quoteInfo || displayState.krwEngine?.quoteInfo) && <p className="rounded-xl bg-app-blueLight p-3 text-xs text-app-blue">마지막 지점에 조회 시세를 반영했습니다. 같은 거래일이면 화면의 마지막 지점만 대체하며 종가 기록에는 저장하지 않습니다. 원화는 조회 환율로 환산합니다.</p>}
                 {krwAutoAdjusted && (
                   <p className="text-xs text-amber-600 font-medium">⚠️ 원화는 환율 데이터가 있는 {meta.krwFirstDate}부터 표시됩니다.</p>
                 )}
@@ -1861,8 +1894,8 @@
                 {/* USD/KRW 토글 */}
                 <div className="flex gap-2">
                   <button
-                    disabled={!appState.usdEngine} aria-pressed={chartUsd && !!appState.usdEngine}
-                    onClick={() => { if (!chartUsd && !chartKrw) return; if (chartUsd && !(chartKrw && appState.krwEngine)) return; setChartUsd(!chartUsd); }}
+                    disabled={!displayState.usdEngine} aria-pressed={chartUsd && !!displayState.usdEngine}
+                    onClick={() => { if (!chartUsd && !chartKrw) return; if (chartUsd && !(chartKrw && displayState.krwEngine)) return; setChartUsd(!chartUsd); }}
                     className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold disabled:opacity-30 disabled:cursor-not-allowed ${
                       chartUsd ? 'bg-app-blue text-white shadow-sm' : 'bg-app-bg text-app-subtext'
                     }`}
@@ -1871,8 +1904,8 @@
                     USD 달러
                   </button>
                   <button
-                    disabled={!appState.krwEngine} aria-pressed={chartKrw && !!appState.krwEngine}
-                    onClick={() => { if (!chartKrw && !chartUsd) return; if (chartKrw && !(chartUsd && appState.usdEngine)) return; setChartKrw(!chartKrw); }}
+                    disabled={!displayState.krwEngine} aria-pressed={chartKrw && !!displayState.krwEngine}
+                    onClick={() => { if (!chartKrw && !chartUsd) return; if (chartKrw && !(chartUsd && displayState.usdEngine)) return; setChartKrw(!chartKrw); }}
                     className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold disabled:opacity-30 disabled:cursor-not-allowed ${
                       chartKrw ? 'bg-app-green text-white shadow-sm' : 'bg-app-bg text-app-subtext'
                     }`}
@@ -1905,8 +1938,8 @@
                       episodeMode={selectedCase?.mode}
                       selectedDate={selectedChartDate}
                       onSelectDate={setSelectedChartDate}
-                      showUsd={chartUsd && !!appState.usdEngine}
-                      showKrw={chartKrw && !!appState.krwEngine}
+                      showUsd={chartUsd && !!displayState.usdEngine}
+                      showKrw={chartKrw && !!displayState.krwEngine}
                       mode="drawdown"
                       targetDd={Number(settings.targetDdPct) / 100}
                       currentDdPct={settings.targetDdPct}
@@ -1923,8 +1956,8 @@
                       episodeMode={selectedCase?.mode}
                       selectedDate={selectedChartDate}
                       onSelectDate={setSelectedChartDate}
-                      showUsd={chartUsd && !!appState.usdEngine}
-                      showKrw={chartKrw && !!appState.krwEngine}
+                      showUsd={chartUsd && !!displayState.usdEngine}
+                      showKrw={chartKrw && !!displayState.krwEngine}
                       mode="price"
                     />
                   </div>
@@ -1932,25 +1965,25 @@
 
                 {/* 핵심 수치 요약 */}
                 <div className="grid grid-cols-2 gap-2">
-                  {chartUsd && appState.usdEngine && (
+                  {chartUsd && displayState.usdEngine && (
                     <div className="bg-app-blueLight p-3 rounded-xl border border-app-blue/20">
                       <p className="text-xs text-app-blue font-bold mb-2">USD 기준</p>
                       <div className="space-y-1 text-xs">
-                        <div className="flex justify-between"><span className="text-app-subtext">최근 종가</span><span className="font-bold text-app-text">{formatNum(appState.usdEngine.metrics.currentPrice)}</span></div>
-                        <div className="flex justify-between"><span className="text-app-subtext">최고가</span><span className="font-bold text-app-text">{formatNum(appState.usdEngine.metrics.ath)}</span></div>
-                        <div className="flex justify-between"><span className="text-app-subtext">현재 하락</span><span className="font-bold text-app-blue">{formatPct(appState.usdEngine.metrics.currentDd)}</span></div>
-                        <div className="flex justify-between"><span className="text-app-subtext">목표 가격</span><span className="font-bold text-app-pink">{formatNum(appState.usdEngine.target.price)} ({appState.usdEngine.target.ddPct}%)</span></div>
+                        <div className="flex justify-between"><span className="text-app-subtext">{displayState.usdEngine.quoteInfo ? '현재가(조회)' : '최근 종가'}</span><span className="font-bold text-app-text">{formatNum(displayState.usdEngine.metrics.currentPrice)}</span></div>
+                        <div className="flex justify-between"><span className="text-app-subtext">최고가</span><span className="font-bold text-app-text">{formatNum(displayState.usdEngine.metrics.ath)}</span></div>
+                        <div className="flex justify-between"><span className="text-app-subtext">현재 하락</span><span className="font-bold text-app-blue">{formatPct(displayState.usdEngine.metrics.currentDd)}</span></div>
+                        <div className="flex justify-between"><span className="text-app-subtext">목표 가격</span><span className="font-bold text-app-pink">{formatNum(displayState.usdEngine.target.price)} ({displayState.usdEngine.target.ddPct}%)</span></div>
                       </div>
                     </div>
                   )}
-                  {chartKrw && appState.krwEngine && (
+                  {chartKrw && displayState.krwEngine && (
                     <div className="bg-app-greenLight p-3 rounded-xl border border-app-green/20">
                       <p className="text-xs text-app-green font-bold mb-2">KRW 기준</p>
                       <div className="space-y-1 text-xs">
-                        <div className="flex justify-between"><span className="text-app-subtext">최근 종가</span><span className="font-bold text-app-text">{formatKrw(appState.krwEngine.metrics.currentPrice)}</span></div>
-                        <div className="flex justify-between"><span className="text-app-subtext">최고가</span><span className="font-bold text-app-text">{formatKrw(appState.krwEngine.metrics.ath)}</span></div>
-                        <div className="flex justify-between"><span className="text-app-subtext">현재 하락</span><span className="font-bold text-app-green">{formatPct(appState.krwEngine.metrics.currentDd)}</span></div>
-                        <div className="flex justify-between"><span className="text-app-subtext">목표 가격</span><span className="font-bold text-app-pink">{formatKrw(appState.krwEngine.target.price)} ({appState.krwEngine.target.ddPct}%)</span></div>
+                        <div className="flex justify-between"><span className="text-app-subtext">{displayState.krwEngine.quoteInfo ? '현재 환산가' : '최근 종가'}</span><span className="font-bold text-app-text">{formatKrw(displayState.krwEngine.metrics.currentPrice)}</span></div>
+                        <div className="flex justify-between"><span className="text-app-subtext">최고가</span><span className="font-bold text-app-text">{formatKrw(displayState.krwEngine.metrics.ath)}</span></div>
+                        <div className="flex justify-between"><span className="text-app-subtext">현재 하락</span><span className="font-bold text-app-green">{formatPct(displayState.krwEngine.metrics.currentDd)}</span></div>
+                        <div className="flex justify-between"><span className="text-app-subtext">목표 가격</span><span className="font-bold text-app-pink">{formatKrw(displayState.krwEngine.target.price)} ({displayState.krwEngine.target.ddPct}%)</span></div>
                       </div>
                     </div>
                   )}
@@ -2299,7 +2332,7 @@
                 dataSource === 'LOADING' ? 'bg-app-border text-app-subtext' :
                 'bg-app-yellowLight text-yellow-600'
               }`}>
-                {dataSource === 'FETCHED' ? `가격 기준 ${rawData.length ? rawData[rawData.length - 1].date : '-'}` : dataSource === 'LOADING' ? 'LOADING' : dataSource === 'IMPORTED' ? 'IMPORTED' : 'SAMPLE'}
+                {dataSource === 'FETCHED' ? `종가 기록 ${rawData.length ? rawData[rawData.length - 1].date : '-'}` : dataSource === 'LOADING' ? 'LOADING' : dataSource === 'IMPORTED' ? 'IMPORTED' : 'SAMPLE'}
               </span>
             </header>
 

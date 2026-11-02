@@ -73,3 +73,52 @@ test('Apps Script response serializes quote Dates and rejects callback injection
  assert.equal(p.quotes.SPY.tradeAt,'2026-11-02T14:45:00.000Z');
  assert.equal(JSON.parse(c.bad.text).error,'invalid callback');
 });
+
+function liveEngine(mode='USD') {
+ const p=mode==='USD'?100:120000;
+ return {analysisStart:'2020-01-01',analysisEnd:'2026-12-31',metrics:{ath:p*1.1,currentPrice:p,currentDd:100/110-1,mdd:-.4},target:{dd:-.2,price:p*.88,isTriggered:false,signalCount:2,episodes:[{entryDate:'2020-01-01'}]},fixedDdTable:[{signalCount:2}],timeSeries:[{date:'2026-10-30',price:p,ath:p*1.1,dd:100/110-1}]};
+}
+
+test('new trading date updates prices, drawdown, target gate and appends only a display point',()=>{
+ const base=liveEngine(),before=JSON.stringify(base);
+ const q=Q.normalize(payload({price:80}),'SPY',now);
+ const out=Q.applySnapshot(base,q,'USD',[],'SPY');
+ assert.equal(out.metrics.currentPrice,80);assert.equal(out.target.isTriggered,true);
+ assert.equal(out.timeSeries.length,2);assert.equal(out.timeSeries.at(-1).date,'2026-11-02');
+ assert.equal(out.timeSeries.at(-1).snapshot,true);
+ assert.equal(out.fixedDdTable,base.fixedDdTable);assert.equal(out.target.episodes,base.target.episodes);
+ assert.equal(JSON.stringify(base),before);
+});
+
+test('last-session quote can update KRW conversion after a weekend without inventing a trading day',()=>{
+ const base=liveEngine('KRW'),q=Q.normalize(payload({price:100,tradeAt:'2026-10-30T20:00:00Z'}),'SPY',now);
+ const out=Q.applySnapshot(base,q,'KRW',[{date:'2026-10-30',closeUsd:100}],'SPY');
+ assert.equal(out.metrics.currentPrice,140000);assert.equal(out.metrics.ath,140000);
+ assert.equal(out.metrics.currentDd,0);assert.equal(out.target.price,112000);
+ assert.equal(out.timeSeries.length,1);assert.equal(out.timeSeries[0].date,'2026-10-30');
+ assert.equal(base.timeSeries[0].price,120000);
+});
+
+test('missing FX, mismatched symbols, historic end dates and mismatched quote basis keep closes',()=>{
+ const base=liveEngine(),q=Q.normalize(payload(),'SPY',now);
+ assert.equal(Q.applySnapshot(base,q,'USD',[],'QQQ'),base);
+ const historic={...base,analysisEnd:'2026-10-30'};
+ assert.equal(Q.applySnapshot(historic,q,'USD',[],'SPY'),historic);
+ assert.equal(Q.applySnapshot(base,{...q,previousClose:70},'USD',[],'SPY'),base);
+ const krw=liveEngine('KRW');
+ assert.equal(Q.applySnapshot(krw,{...q,fx:null},'KRW',[{date:'2026-10-30',closeUsd:100}],'SPY'),krw);
+});
+
+test('chart model receives the very same ephemeral snapshot while historical series stays unchanged',()=>{
+ const vm=require('node:vm'),fs=require('node:fs'),path=require('node:path');
+ const html=fs.readFileSync(path.join(__dirname,'..','index.html'),'utf8');
+ const code=html.slice(html.indexOf('    // CHART_ENGINE_START'),html.indexOf('    // CHART_ENGINE_END'));
+ const c=vm.createContext({});vm.runInContext(code+';this.build=buildChartModel;',c);
+ const base=liveEngine(),q=Q.normalize(payload({price:80}),'SPY',now);
+ const view=Q.applySnapshot(base,q,'USD',[],'SPY');
+ const model=c.build(view.timeSeries,null);
+ assert.equal(model.rows.at(-1).usdPrice,view.metrics.currentPrice);
+ assert.equal(model.rows.at(-1).usdDd,view.metrics.currentDd);
+ assert.equal(model.rows.at(-1).usdSnapshot,true);
+ assert.equal(base.timeSeries.length,1);
+});
