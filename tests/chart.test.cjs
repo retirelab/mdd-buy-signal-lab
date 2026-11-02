@@ -8,7 +8,29 @@ const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
 const source = html.slice(html.indexOf('    // CHART_ENGINE_START'), html.indexOf('    // CHART_ENGINE_END'));
 const context = vm.createContext({});
 vm.runInContext(source + ';this.api = { nearestChartIndex, chartX, chartIndexAtPointer, sampleChartExtrema, buildChartModel, chartValueTicks };', context);
-const { nearestChartIndex, chartX, chartIndexAtPointer, sampleChartExtrema, buildChartModel, chartValueTicks } = context.api;
+vm.runInContext('this.api.buildEpisodeView = buildEpisodeView;', context);
+const { nearestChartIndex, chartX, chartIndexAtPointer, sampleChartExtrema, buildChartModel, chartValueTicks, buildEpisodeView } = context.api;
+
+test('episode zoom preserves original prices and index baseline, with context and exact markers', () => {
+  const data=Array.from({length:150},(_,i)=>({date:new Date(Date.UTC(2020,0,i+1)).toISOString().slice(0,10),price:100+i,dd:0}));
+  const model=buildChartModel(data,null);
+  const episode={entryDate:data[40].date,lowDate:data[45].date,breakevenDate:data[50].date,recoveryDate:data[70].date};
+  const view=buildEpisodeView(model,episode);
+  assert.equal(view.model.rows[0].date,data[25].date);
+  assert.equal(view.model.rows.at(-1).date,data[85].date);
+  assert.equal(view.model.byDate.get(data[40].date).usdIndex,140);
+  assert.equal(view.markers.length,4);
+  assert.equal(model.rows.length,150);
+  for(const m of view.markers) assert.ok(view.model.sampled.some(r=>r.date===m.date));
+});
+
+test('pending cases extend to last data and do not invent recovery markers', () => {
+  const model=buildChartModel([{date:'2020-01-01',price:100,dd:0},{date:'2020-01-02',price:80,dd:-.2},{date:'2020-01-03',price:70,dd:-.3}],null);
+  const view=buildEpisodeView(model,{entryDate:'2020-01-02',lowDate:'2020-01-03',recoveryDate:null,breakevenDate:null});
+  assert.equal(view.markers.length,2);
+  assert.equal(view.model.rows.at(-1).date,'2020-01-03');
+  assert.equal(buildEpisodeView(model,null).model,model);
+});
 const timestamp = d => Date.parse(d + 'T00:00:00Z');
 const row = (date, price, dd = 0) => ({ date, price, dd });
 

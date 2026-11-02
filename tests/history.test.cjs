@@ -89,3 +89,13 @@ test('engine separates USD/KRW, respects end cutoff and handles deeper empty ban
   assert.equal(usd.fixedDdTable.find(r => r.ddPct === -50).oneYearRate, null);
   assert.equal(usd.target.episodes.length, 1);
 });
+
+test('prepared analysis reuses series and band tables while target stats stay correct', () => {
+  const rows=[100,80,60,100].map((v,i)=>({date:`2020-01-0${i+1}`,closeUsd:v}));
+  const first=runEngine(rows,'closeUsd','2020-01-01','2020-01-04',{targetDdPct:-15});
+  const cached=runEngine(rows,'closeUsd','2020-01-01','2020-01-04',{targetDdPct:-30},first,first.fixedDdTable);
+  const plain=runEngine(rows,'closeUsd','2020-01-01','2020-01-04',{targetDdPct:-30});
+  assert.equal(cached.timeSeries,first.timeSeries);
+  assert.equal(cached.fixedDdTable,first.fixedDdTable);
+  assert.deepEqual(JSON.parse(JSON.stringify(cached.target)),JSON.parse(JSON.stringify(plain.target)));
+});

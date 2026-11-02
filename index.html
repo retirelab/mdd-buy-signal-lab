@@ -588,8 +588,8 @@
       });
     }
 
-    function runEngine(rawData, priceKey, analysisStart, analysisEnd, settings) {
-      const base = buildTimeSeries(rawData, priceKey, analysisStart, analysisEnd);
+    function runEngine(rawData, priceKey, analysisStart, analysisEnd, settings, preparedBase = null, preparedTable = null) {
+      const base = preparedBase || buildTimeSeries(rawData, priceKey, analysisStart, analysisEnd);
       if (!base) return null;
 
       const timeSeries = base.timeSeries;
@@ -601,7 +601,7 @@
       const safeTargetDdPct = Math.max(-100, Math.min(-1, targetDdPct));
       const targetDd = safeTargetDdPct / 100;
 
-      const fixedDdTable = buildFixedDdTable(timeSeries, periodMdd);
+      const fixedDdTable = preparedTable || buildFixedDdTable(timeSeries, periodMdd);
       const targetStats = computeSignalStats(timeSeries, targetDd);
 
       const targetPrice = metrics.ath * (1 + targetDd);
@@ -637,7 +637,7 @@
     // -------------------------------------
     // UI Components
     // -------------------------------------
-    const HISTORY_VERSION = '2026.11.02.3';
+    const HISTORY_VERSION = '2026.11.02.4';
 
     function HistoryMethodNote() {
       return <div className="rounded-xl bg-amber-50 p-4 text-xs leading-relaxed text-amber-800 space-y-2">
@@ -676,7 +676,7 @@
       </div>;
     }
 
-    function HistoryCurrency({ engine, mode }) {
+    function HistoryCurrency({ engine, mode, onShowEpisode }) {
       const s = engine.target;
       const money = mode === 'USD' ? (v) => '$' + formatNum(v) : formatKrw;
       const [first, last] = [engine.timeSeries[0], engine.timeSeries[engine.timeSeries.length - 1]];
@@ -704,7 +704,7 @@
             <p className="my-3 text-xs leading-relaxed text-app-subtext">최신 사례부터 표시합니다. 매수가 회복은 진입 다음 거래일부터 진입가 이상인 첫 종가입니다. 저점·추가 하락은 진입일부터 전고점 회복일 또는 마지막 데이터 날짜까지 관찰한 값입니다.</p>
             <div className="overflow-x-auto" tabIndex={0} role="region" aria-label={`${mode} 사례별 기록`}>
               <table className="w-full whitespace-nowrap text-xs text-left">
-                <thead><tr>{['진입일 / 진입가', '이후 저점 / 날짜', '추가 하락', '매수가 회복 / 기간', '전고점 회복 / 기간', '상태'].map(h => <th key={h} className="px-3 py-2 font-semibold text-app-subtext">{h}</th>)}</tr></thead>
+                <thead><tr>{['진입일 / 진입가', '이후 저점 / 날짜', '추가 하락', '매수가 회복 / 기간', '전고점 회복 / 기간', '상태', '차트'].map(h => <th key={h} className="px-3 py-2 font-semibold text-app-subtext">{h}</th>)}</tr></thead>
                 <tbody>{[...s.episodes].reverse().map(e => <tr key={e.entryDate} className="border-t border-gray-200">
                   <td className="px-3 py-3">{e.entryDate}<br />{money(e.entryPrice)}</td>
                   <td className="px-3 py-3">{money(e.lowPrice)}<br />{e.lowDate}</td>
@@ -712,6 +712,7 @@
                   <td className="px-3 py-3">{e.breakevenDate || '미회복'}<br />{e.breakevenDays === null ? `${e.observedDays}일 관찰 중` : `${e.breakevenDays}일`}</td>
                   <td className="px-3 py-3">{e.recoveryDate || '미회복'}<br />{e.recoveryDays === null ? `${e.observedDays}일 관찰 중` : `${e.recoveryDays}일`}</td>
                   <td className={`px-3 py-3 font-bold ${e.status === 'RECOVERED' ? 'text-app-green' : 'text-amber-700'}`}>{e.status === 'RECOVERED' ? '회복 완료' : '진행 중'}</td>
+                  <td className="px-3 py-3"><button type="button" className="rounded-lg bg-app-blueLight px-3 py-2 font-bold text-app-blue" aria-label={`${mode} ${e.entryDate} 사례 차트에서 보기`} onClick={() => onShowEpisode(mode, e.entryDate)}>차트에서 보기</button></td>
                 </tr>)}</tbody>
               </table>
             </div>
@@ -1108,9 +1109,24 @@
       for (let v = Math.ceil(min / step) * step; v <= max + 1e-9; v += step) ticks.push(Number(v.toPrecision(12)));
       return ticks;
     }
+    function buildEpisodeView(model, episode) {
+      if (!episode || !model.rows.length) return { model, markers: [] };
+      const specs = [
+        ['진입', episode.entryDate, '#9333ea'], ['저점', episode.lowDate, '#e11d48'],
+        ['매수가 회복', episode.breakevenDate, '#d97706'], ['전고점 회복', episode.recoveryDate, '#059669']
+      ];
+      const markers = specs.filter(([,date]) => date && model.byDate.has(date)).map(([label,date,color]) => ({label,date,color}));
+      const start = nearestChartIndex(model.rows, Date.parse(episode.entryDate + 'T00:00:00Z'));
+      const endDate = episode.recoveryDate || model.rows[model.rows.length - 1].date;
+      const end = nearestChartIndex(model.rows, Date.parse(endDate + 'T00:00:00Z'));
+      const rows = model.rows.slice(Math.max(0,start-15), Math.min(model.rows.length,end+16));
+      const marked = markers.map(m => model.byDate.get(m.date));
+      const sampled = [...new Map([...sampleChartExtrema(rows), ...marked].map(r => [r.date,r])).values()].sort((a,b) => a.timestamp-b.timestamp);
+      return { model: { rows, sampled, byDate: new Map(rows.map(r => [r.date,r])) }, markers };
+    }
     // CHART_ENGINE_END
 
-    function OverlayChart({ model, selectedDate, onSelectDate, showUsd, showKrw, mode, targetDd, currentDdPct, onDdPctChange }) {
+    function OverlayChart({ model, markers = [], episodeMode, selectedDate, onSelectDate, showUsd, showKrw, mode, targetDd, currentDdPct, onDdPctChange }) {
       const [sliderDraft, setSliderDraft] = useState(currentDdPct);
       const wrapRef = useRef(null);
       const gestureRef = useRef(null);
@@ -1118,12 +1134,9 @@
       const isDD = mode === 'drawdown';
       const previewTarget = isDD && Number.isFinite(sliderDraft) ? Math.round(sliderDraft / 5) * 5 / 100 : targetDd;
       const sel = model.byDate.get(selectedDate) || null;
-      const chartData = useMemo(() => {
-        if (!sel || model.sampled.some(row => row.date === sel.date)) return model.sampled;
-        return [...model.sampled, sel].sort((a, b) => a.timestamp - b.timestamp);
-      }, [model, sel]);
-      if (!model.rows.length) return <div className="flex justify-center items-center h-48 text-app-subtext text-sm">차트 데이터 없음</div>;
-
+      const drawing = useMemo(() => {
+        if (!model.rows.length) return null;
+      const chartData = model.sampled;
       const g = CHART_GEOMETRY;
       const endX = g.width - g.right;
       const endY = g.height - g.bottom;
@@ -1158,6 +1171,10 @@
       }
       const usdPath = showUsd ? buildPath(usdKey) : { line: '', area: '' };
       const krwPath = showKrw ? buildPath(krwKey) : { line: '', area: '' };
+      return { g, endX, endY, first, last, getX, getY, topPct, ticks, dateTicks, usdKey, krwKey, usdPath, krwPath };
+      }, [model, showUsd, showKrw, isDD, previewTarget]);
+      if (!drawing) return <div className="h-48 text-sm text-app-subtext">차트 데이터 없음</div>;
+      const { g, endX, endY, getX, getY, topPct, ticks, dateTicks, usdKey, krwKey, usdPath, krwPath } = drawing;
       const yTarget = isDD && Number.isFinite(previewTarget) ? getY(previewTarget) : null;
 
       function selectAt(clientX) {
@@ -1191,6 +1208,15 @@
             {yTarget !== null && <line x1={g.left} y1={yTarget} x2={endX} y2={yTarget} stroke="#f04452" strokeDasharray="6 5" vectorEffect="non-scaling-stroke" />}
             {showUsd && <path data-series="USD" d={usdPath.line} fill="none" stroke="#3182f6" strokeWidth="2" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />}
             {showKrw && <path data-series="KRW" d={krwPath.line} fill="none" stroke="#20c997" strokeWidth="2" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />}
+            {markers.map(m => {
+              const row = model.byDate.get(m.date);
+              const key = episodeMode === 'KRW' ? krwKey : usdKey;
+              if (!row || !Number.isFinite(row[key]) || (episodeMode === 'KRW' ? !showKrw : !showUsd)) return null;
+              return <g key={m.label} data-episode-marker={m.label} pointerEvents="none">
+                <line x1={getX(row)} x2={getX(row)} y1={g.top} y2={endY} stroke={m.color} strokeDasharray="2 5" opacity=".5" vectorEffect="non-scaling-stroke" />
+                <circle cx={getX(row)} cy={getY(row[key])} r="7" fill={m.color}><title>{m.label} {m.date}</title></circle>
+              </g>;
+            })}
             {sel && <>
               <line data-selection-date={sel.date} x1={getX(sel)} x2={getX(sel)} y1={g.top} y2={endY} stroke="#64748b" strokeDasharray="3 4" vectorEffect="non-scaling-stroke" />
               {showUsd && Number.isFinite(sel[usdKey]) && <circle cx={getX(sel)} cy={getY(sel[usdKey])} r="5" fill="#3182f6" />}
@@ -1226,13 +1252,13 @@
     // -------------------------------------
     // Main App
     // -------------------------------------
-      function Accordion({ title, subtitle, open, onToggle, children, badge, emoji }) {
+      function Accordion({ title, subtitle, open, onToggle, children, badge, emoji, sectionRef }) {
         const containerRef = useRef(null);
 
         function handleToggle(e) { e.preventDefault(); onToggle(); }
 
         return (
-          <div ref={containerRef} className="bg-white rounded-3xl shadow-card mb-4 border border-app-border overflow-hidden">
+          <div ref={sectionRef || containerRef} className="bg-white rounded-3xl shadow-card mb-4 border border-app-border overflow-hidden">
             <button
               type="button"
               onClick={handleToggle} aria-expanded={open}
@@ -1275,6 +1301,8 @@
       const [chartUsd, setChartUsd] = useState(true);
       const [chartKrw, setChartKrw] = useState(true);
       const [selectedChartDate, setSelectedChartDate] = useState(null);
+      const [selectedCase, setSelectedCase] = useState(null);
+      const chartSectionRef = useRef(null);
 
       // 토글 시 스크롤 위치 유지 (mobile Samsung Browser 점프 방지)
       function toggleWithScrollLock(setter) {
@@ -1392,6 +1420,17 @@
         [rawData, settings.startDate]
       );
 
+      const analysisCache = useMemo(() => {
+        const cache = {};
+        if (dataSource === 'LOADING') return cache;
+        for (const mode of ['USD', 'KRW']) {
+          if (settings.currencyMode !== 'BOTH' && settings.currencyMode !== mode) continue;
+          const base = buildTimeSeries(rawData, mode === 'USD' ? 'closeUsd' : 'closeKrw', mode === 'USD' ? meta.usdAnalysisStart : meta.krwAnalysisStart, settings.endDate);
+          if (base) cache[mode] = { base, table: buildFixedDdTable(base.timeSeries, base.metrics.mdd) };
+        }
+        return cache;
+      }, [rawData, dataSource, settings.currencyMode, settings.endDate, meta]);
+
       const appState = useMemo(() => {
         let usdEngine = null;
         let krwEngine = null;
@@ -1399,10 +1438,10 @@
 
         if (dataSource !== 'LOADING') {
           if (settings.currencyMode === 'USD' || settings.currencyMode === 'BOTH') {
-            usdEngine = runEngine(rawData, 'closeUsd', meta.usdAnalysisStart, settings.endDate, settings);
+            usdEngine = runEngine(rawData, 'closeUsd', meta.usdAnalysisStart, settings.endDate, settings, analysisCache.USD?.base, analysisCache.USD?.table);
           }
           if (settings.currencyMode === 'KRW' || settings.currencyMode === 'BOTH') {
-            krwEngine = runEngine(rawData, 'closeKrw', meta.krwAnalysisStart, settings.endDate, settings);
+            krwEngine = runEngine(rawData, 'closeKrw', meta.krwAnalysisStart, settings.endDate, settings, analysisCache.KRW?.base, analysisCache.KRW?.table);
           }
 
           const usdCount = usdEngine ? usdEngine.timeSeries.length : 0;
@@ -1428,7 +1467,7 @@
           configWarning,
           gates: { fearGate, ddGate, marketGate, finalSignal }
         };
-      }, [rawData, settings, dataSource, meta, liveRating]);
+      }, [rawData, settings, dataSource, meta, liveRating, analysisCache]);
 
       useEffect(() => {
         if (settings.currencyMode === 'USD') setChartUsd(true);
@@ -1438,13 +1477,27 @@
       const chartModel = useMemo(() => buildChartModel(
         appState.usdEngine ? appState.usdEngine.timeSeries : null,
         appState.krwEngine ? appState.krwEngine.timeSeries : null
-      ), [appState.usdEngine, appState.krwEngine]);
+      ), [appState.usdEngine?.timeSeries, appState.krwEngine?.timeSeries]);
 
       useEffect(() => { setSelectedChartDate(null); }, [settings.symbol, settings.startDate, settings.endDate, settings.currencyMode]);
 
+      const activeEpisode = selectedCase
+        ? (selectedCase.mode === 'USD' ? appState.usdEngine : appState.krwEngine)?.target.episodes.find(e => e.entryDate === selectedCase.entryDate) : null;
+      const episodeView = useMemo(() => buildEpisodeView(chartModel, activeEpisode), [chartModel, activeEpisode]);
+      useEffect(() => { setSelectedCase(null); }, [settings.symbol, settings.startDate, settings.endDate, settings.currencyMode, settings.targetDdPct, rawData]);
+      useEffect(() => {
+        if (!selectedCase) return;
+        const frame = requestAnimationFrame(() => chartSectionRef.current?.scrollIntoView({ block: 'start', behavior: 'auto' }));
+        return () => cancelAnimationFrame(frame);
+      }, [selectedCase]);
+      function showEpisodeOnChart(mode, entryDate) {
+        setChartUsd(mode === 'USD'); setChartKrw(mode === 'KRW');
+        setShowChart(true); setSelectedChartDate(entryDate); setSelectedCase({ mode, entryDate });
+      }
+
       function handleChartDateInput(e) {
-        const i = nearestChartIndex(chartModel.rows, Date.parse(e.target.value + 'T00:00:00Z'));
-        setSelectedChartDate(i === null ? null : chartModel.rows[i].date);
+        const i = nearestChartIndex(episodeView.model.rows, Date.parse(e.target.value + 'T00:00:00Z'));
+        setSelectedChartDate(i === null ? null : episodeView.model.rows[i].date);
       }
 
       function handleSettingChange(e) {
@@ -1722,6 +1775,7 @@
               title="가격 및 낙폭 차트"
               subtitle={primary ? `${settings.symbol} 최고점 대비 ${formatPct1(primary.metrics.currentDd)} 하락 중` : '데이터 없음'}
               emoji="📊"
+              sectionRef={chartSectionRef}
               open={showChart}
               onToggle={() => setShowChart(!showChart)}
             >
@@ -1729,6 +1783,16 @@
                 {krwAutoAdjusted && (
                   <p className="text-xs text-amber-600 font-medium">⚠️ 원화는 환율 데이터가 있는 {meta.krwFirstDate}부터 표시됩니다.</p>
                 )}
+
+                {activeEpisode && <div className="rounded-xl bg-app-blueLight p-4 space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-sm font-bold text-app-blue">{selectedCase.mode} · {activeEpisode.entryDate} 하락 사례</p>
+                    <button className="text-xs font-bold underline" onClick={() => setSelectedCase(null)}>전체 분석 기간으로</button>
+                  </div>
+                  <p className="text-xs text-app-text">사례 구간을 확대했습니다. 통계의 분석 기간과 가격 지수의 시작 기준은 그대로입니다.</p>
+                  <div className="flex flex-wrap gap-2">{episodeView.markers.map(m => <button key={m.label} onClick={() => setSelectedChartDate(m.date)} className="rounded-lg bg-white px-3 py-2 text-xs font-bold" style={{ color: m.color }}>{m.label} · {m.date}</button>)}</div>
+                  {activeEpisode.status === 'PENDING' && <p className="text-xs text-amber-800">진행 중인 사례입니다. 저점은 마지막 데이터 날짜까지 관찰한 값이며 전고점 회복은 아직 확인되지 않았습니다.</p>}
+                </div>}
 
                 {/* USD/KRW 토글 */}
                 <div className="flex gap-2">
@@ -1758,7 +1822,7 @@
                   <div className="flex flex-wrap items-center gap-3">
                     <label className="text-xs font-bold text-app-text" htmlFor="chart-date">날짜 직접 조회</label>
                     <input id="chart-date" aria-label="차트 조회 날짜" type="date"
-                      min={chartModel.rows[0].date} max={chartModel.rows[chartModel.rows.length - 1].date}
+                      min={episodeView.model.rows[0].date} max={episodeView.model.rows[episodeView.model.rows.length - 1].date}
                       value={selectedChartDate || ''}
                       onInput={handleChartDateInput} onChange={handleChartDateInput}
                       className="max-w-full rounded-lg border border-gray-200 bg-white px-2 py-1 text-sm" />
@@ -1772,7 +1836,9 @@
                   <div className="p-4 rounded-xl border border-gray-100 bg-gray-50">
                     <h4 className="font-bold text-app-text mb-3 text-sm">📉 최고점 대비 하락률</h4>
                     <OverlayChart
-                      model={chartModel}
+                      model={episodeView.model}
+                      markers={episodeView.markers}
+                      episodeMode={selectedCase?.mode}
                       selectedDate={selectedChartDate}
                       onSelectDate={setSelectedChartDate}
                       showUsd={chartUsd && !!appState.usdEngine}
@@ -1788,7 +1854,9 @@
                   <div className="p-4 rounded-xl border border-gray-100 bg-gray-50">
                     <h4 className="font-bold text-app-text mb-3 text-sm">📈 가격 흐름 (시작 = 100 기준)</h4>
                     <OverlayChart
-                      model={chartModel}
+                      model={episodeView.model}
+                      markers={episodeView.markers}
+                      episodeMode={selectedCase?.mode}
                       selectedDate={selectedChartDate}
                       onSelectDate={setSelectedChartDate}
                       showUsd={chartUsd && !!appState.usdEngine}
@@ -1838,7 +1906,7 @@
                 {dataSource === 'SAMPLE' && <p className="rounded-xl bg-red-50 p-3 text-sm font-bold text-red-600">샘플 데이터입니다. 실제 과거 투자 기록이 아닙니다.</p>}
                 {['USD', 'KRW'].map(mode => {
                   const engine = mode === 'USD' ? appState.usdEngine : appState.krwEngine;
-                  return engine ? <HistoryCurrency key={mode} engine={engine} mode={mode} /> : null;
+                  return engine ? <HistoryCurrency key={mode} engine={engine} mode={mode} onShowEpisode={showEpisodeOnChart} /> : null;
                 })}
                 <HistoryMethodNote />
                 <div ref={detailTableRef}>
