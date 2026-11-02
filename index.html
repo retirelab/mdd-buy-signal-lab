@@ -637,7 +637,7 @@
     // -------------------------------------
     // UI Components
     // -------------------------------------
-    const HISTORY_VERSION = '2026.11.02.1';
+    const HISTORY_VERSION = '2026.11.02.2';
 
     function HistoryMethodNote() {
       return <div className="rounded-xl bg-amber-50 p-4 text-xs leading-relaxed text-amber-800 space-y-2">
@@ -1021,260 +1021,197 @@
       );
     }
 
-    // -------------------------------------
-    // OverlayChart (drawdown or price mode)
-    // Renders USD (blue) + KRW (green) overlaid
-    // -------------------------------------
-    function OverlayChart({ usdTimeSeries, krwTimeSeries, showUsd, showKrw, mode, targetDd, primaryMode, currentDdPct, onDdPctChange }) {
-      const [selectedIndex, setSelectedIndex] = useState(null);
+    // CHART_ENGINE_START: drawing can be reduced; inspection always uses original rows.
+    const CHART_GEOMETRY = { width: 1000, height: 280, left: 120, right: 160, top: 20, bottom: 40 };
+
+    function nearestChartIndex(rows, timestamp) {
+      if (!rows.length || !Number.isFinite(timestamp)) return null;
+      let lo = 0, hi = rows.length - 1;
+      while (lo < hi) {
+        const mid = Math.floor((lo + hi) / 2);
+        if (rows[mid].timestamp < timestamp) lo = mid + 1;
+        else hi = mid;
+      }
+      if (lo > 0 && timestamp - rows[lo - 1].timestamp <= rows[lo].timestamp - timestamp) return lo - 1;
+      return lo;
+    }
+
+    function chartX(timestamp, first, last, geometry = CHART_GEOMETRY) {
+      const ratio = last > first ? Math.max(0, Math.min(1, (timestamp - first) / (last - first))) : 0.5;
+      return geometry.left + ratio * (geometry.width - geometry.left - geometry.right);
+    }
+
+    function chartIndexAtPointer(rows, clientX, rect, geometry = CHART_GEOMETRY) {
+      if (!rows.length || !(rect.width > 0)) return null;
+      const svgX = ((clientX - rect.left) / rect.width) * geometry.width;
+      const ratio = Math.max(0, Math.min(1, (svgX - geometry.left) / (geometry.width - geometry.left - geometry.right)));
+      return nearestChartIndex(rows, rows[0].timestamp + ratio * (rows[rows.length - 1].timestamp - rows[0].timestamp));
+    }
+
+    function sampleChartExtrema(rows, buckets = 80) {
+      if (rows.length <= buckets * 2) return rows;
+      const keep = new Set([0, rows.length - 1]);
+      const keys = ['usdIndex', 'krwIndex', 'usdDd', 'krwDd'];
+      const size = Math.ceil(rows.length / buckets);
+      for (let start = 0; start < rows.length; start += size) {
+        const end = Math.min(rows.length, start + size);
+        for (const key of keys) {
+          let min = null, max = null;
+          for (let i = start; i < end; i++) {
+            if (!Number.isFinite(rows[i][key])) continue;
+            if (min === null || rows[i][key] < rows[min][key]) min = i;
+            if (max === null || rows[i][key] > rows[max][key]) max = i;
+          }
+          if (min !== null) { keep.add(min); keep.add(max); }
+        }
+      }
+      // Keep both sides of gaps so SVG paths never connect missing observations.
+      for (let i = 1; i < rows.length; i++) {
+        if (keys.some(key => Number.isFinite(rows[i - 1][key]) !== Number.isFinite(rows[i][key]))) {
+          keep.add(i - 1); keep.add(i);
+        }
+      }
+      return [...keep].sort((a, b) => a - b).map(i => rows[i]);
+    }
+
+    function buildChartModel(usdSeries, krwSeries) {
+      const usd = new Map((usdSeries || []).map(row => [row.date, row]));
+      const krw = new Map((krwSeries || []).map(row => [row.date, row]));
+      const dates = [...new Set([...usd.keys(), ...krw.keys()])].sort();
+      const usdBase = usdSeries && usdSeries.length ? usdSeries[0].price : null;
+      const krwBase = krwSeries && krwSeries.length ? krwSeries[0].price : null;
+      const rows = dates.map(date => {
+        const u = usd.get(date), k = krw.get(date);
+        return {
+          date, timestamp: Date.parse(date + 'T00:00:00Z'),
+          usdPrice: u ? u.price : null, krwPrice: k ? k.price : null,
+          usdDd: u ? u.dd : null, krwDd: k ? k.dd : null,
+          usdIndex: u && usdBase > 0 ? u.price / usdBase * 100 : null,
+          krwIndex: k && krwBase > 0 ? k.price / krwBase * 100 : null
+        };
+      });
+      return { rows, sampled: sampleChartExtrema(rows), byDate: new Map(rows.map(row => [row.date, row])) };
+    }
+
+    function chartValueTicks(min, max, drawdown) {
+      if (!Number.isFinite(min) || !Number.isFinite(max) || max <= min) return [];
+      if (drawdown) {
+        const step = Math.max(.05, Math.ceil((-min / 4) / .05) * .05);
+        const ticks = [0];
+        for (let v = -step; v >= min - 1e-9; v -= step) ticks.push(Number(v.toFixed(8)));
+        return ticks;
+      }
+      const raw = (max - min) / 4;
+      const power = 10 ** Math.floor(Math.log10(raw));
+      const step = [1, 2, 2.5, 5, 10].find(x => x * power >= raw) * power;
+      const ticks = [];
+      for (let v = Math.ceil(min / step) * step; v <= max + 1e-9; v += step) ticks.push(Number(v.toPrecision(12)));
+      return ticks;
+    }
+    // CHART_ENGINE_END
+
+    function OverlayChart({ model, selectedDate, onSelectDate, showUsd, showKrw, mode, targetDd, currentDdPct, onDdPctChange }) {
       const [sliderDraft, setSliderDraft] = useState(currentDdPct);
       const wrapRef = useRef(null);
       const lastTouchRef = useRef(false);
-
-      // 외부에서 currentDdPct가 바뀌면 draft도 동기화
       useEffect(() => { setSliderDraft(currentDdPct); }, [currentDdPct]);
-
-      // mode: 'drawdown' or 'price'
       const isDD = mode === 'drawdown';
-
-      // Merge both series by date
+      const sel = model.byDate.get(selectedDate) || null;
       const chartData = useMemo(() => {
-        const usdMap = new Map();
-        const krwMap = new Map();
-        if (usdTimeSeries) usdTimeSeries.forEach(d => usdMap.set(d.date, d));
-        if (krwTimeSeries) krwTimeSeries.forEach(d => krwMap.set(d.date, d));
+        if (!sel || model.sampled.some(row => row.date === sel.date)) return model.sampled;
+        return [...model.sampled, sel].sort((a, b) => a.timestamp - b.timestamp);
+      }, [model, sel]);
+      if (!model.rows.length) return <div className="flex justify-center items-center h-48 text-app-subtext text-sm">차트 데이터 없음</div>;
 
-        const allDates = [...new Set([...usdMap.keys(), ...krwMap.keys()])].sort();
-        if (allDates.length === 0) return [];
+      const g = CHART_GEOMETRY;
+      const endX = g.width - g.right;
+      const endY = g.height - g.bottom;
+      const first = model.rows[0], last = model.rows[model.rows.length - 1];
+      const usdKey = isDD ? 'usdDd' : 'usdIndex';
+      const krwKey = isDD ? 'krwDd' : 'krwIndex';
+      const vals = model.sampled.flatMap(row => [showUsd ? row[usdKey] : null, showKrw ? row[krwKey] : null]).filter(Number.isFinite);
+      const yMin = isDD ? Math.min(...vals, -.05, Number.isFinite(targetDd) ? targetDd : 0) * 1.12 : Math.min(...vals, 100) * .95;
+      const yMax = isDD ? 0 : Math.max(...vals, 100) * 1.05;
+      const getX = row => chartX(row.timestamp, first.timestamp, last.timestamp);
+      const getY = value => g.top + ((yMax - value) / (yMax - yMin)) * (endY - g.top);
+      const topPct = value => `${value / g.height * 100}%`;
+      const ticks = chartValueTicks(yMin, yMax, isDD);
+      const dateTicks = [...new Set([0, nearestChartIndex(model.rows, (first.timestamp + last.timestamp) / 2), model.rows.length - 1])].map(i => model.rows[i]);
 
-        // Sample ~260 points
-        const sampleEvery = Math.max(1, Math.floor(allDates.length / 260));
-        let sampled = allDates.filter((_, i) => i % sampleEvery === 0);
-
-        // Ensure MDD points are included (drawdown mode)
-        if (isDD) {
-          if (usdTimeSeries && usdTimeSeries.length > 0) {
-            const usdMdd = usdTimeSeries.reduce((a, d) => d.dd < a.dd ? d : a, usdTimeSeries[0]);
-            if (!sampled.includes(usdMdd.date)) sampled.push(usdMdd.date);
-          }
-          if (krwTimeSeries && krwTimeSeries.length > 0) {
-            const krwMdd = krwTimeSeries.reduce((a, d) => d.dd < a.dd ? d : a, krwTimeSeries[0]);
-            if (!sampled.includes(krwMdd.date)) sampled.push(krwMdd.date);
-          }
-        }
-
-        // Ensure last date included
-        if (sampled[sampled.length - 1] !== allDates[allDates.length - 1]) {
-          sampled.push(allDates[allDates.length - 1]);
-        }
-        sampled.sort();
-
-        // Normalize base for price mode
-        const usdBase = usdTimeSeries && usdTimeSeries.length > 0 ? usdTimeSeries[0].price : 1;
-        const krwBase = krwTimeSeries && krwTimeSeries.length > 0 ? krwTimeSeries[0].price : 1;
-
-        return sampled.map(date => {
-          const u = usdMap.get(date);
-          const k = krwMap.get(date);
-          return {
-            date,
-            usdVal: u ? (isDD ? u.dd : (u.price / usdBase) * 100) : null,
-            krwVal: k ? (isDD ? k.dd : (k.price / krwBase) * 100) : null,
-            usdPrice: u ? u.price : null,
-            krwPrice: k ? k.price : null,
-            usdDd: u ? u.dd : null,
-            krwDd: k ? k.dd : null,
-          };
-        });
-      }, [usdTimeSeries, krwTimeSeries, mode]);
-
-      if (!chartData || chartData.length === 0) {
-        return <div className="flex justify-center items-center h-48 bg-app-border/50 rounded-xl text-app-subtext text-sm">차트 데이터 없음</div>;
-      }
-
-      const svgWidth = 1000;
-      const svgHeight = 250;
-      const padTop = 18;
-      const padBottom = 18;
-      const padLeft = 0;
-      const padRight = svgWidth * (CHART_LABEL_WIDTH_PCT / 100);
-      const drawWidth = svgWidth - padLeft - padRight;
-      const drawHeight = svgHeight - padTop - padBottom;
-
-      // Compute Y scale
-      let yMin, yMax;
-      if (isDD) {
-        const allVals = chartData.flatMap(d => [showUsd ? d.usdVal : null, showKrw ? d.krwVal : null]).filter(v => v !== null && Number.isFinite(v));
-        const candidates = [...allVals, -0.05];
-        if (Number.isFinite(targetDd)) candidates.push(targetDd);
-        yMin = Math.min.apply(null, candidates) * 1.12;
-        yMax = 0;
-      } else {
-        const allVals = chartData.flatMap(d => [showUsd ? d.usdVal : null, showKrw ? d.krwVal : null]).filter(v => v !== null && Number.isFinite(v));
-        if (allVals.length === 0) { yMin = 80; yMax = 120; }
-        else { yMin = Math.min.apply(null, allVals) * 0.95; yMax = Math.max.apply(null, allVals) * 1.05; }
-      }
-      const yRange = yMax - yMin;
-
-      const getX = (i) => padLeft + (chartData.length > 1 ? (i / (chartData.length - 1)) * drawWidth : 0);
-      const getY = (val) => {
-        if (!Number.isFinite(val)) return null;
-        return padTop + ((yMax - val) / yRange) * drawHeight;
-      };
-      const toPct = (val) => `${(val / svgHeight) * 100}%`;
-
-      // Build paths
       function buildPath(key) {
-        const pts = [];
-        chartData.forEach((d, i) => {
-          if (d[key] !== null && Number.isFinite(d[key])) {
-            const y = getY(d[key]);
-            if (y !== null) pts.push({ x: getX(i), y, i });
-          }
+        const lines = [], areas = [];
+        let segment = [];
+        const flush = () => {
+          if (!segment.length) return;
+          lines.push('M ' + segment.map(p => `${p.x},${p.y}`).join(' L '));
+          const baseline = getY(isDD ? 0 : yMin);
+          areas.push(`M ${segment[0].x},${baseline} L ${segment.map(p => `${p.x},${p.y}`).join(' L ')} L ${segment[segment.length - 1].x},${baseline} Z`);
+          segment = [];
+        };
+        chartData.forEach(row => {
+          if (Number.isFinite(row[key])) segment.push({ x: getX(row), y: getY(row[key]) });
+          else flush();
         });
-        if (pts.length === 0) return { line: '', area: '', pts: [] };
-        const line = 'M ' + pts.map(p => `${p.x},${p.y}`).join(' L ');
-        const y0 = isDD ? getY(0) : getY(yMin);
-        const area = `M ${pts[0].x},${y0} L ${pts.map(p => `${p.x},${p.y}`).join(' L ')} L ${pts[pts.length-1].x},${y0} Z`;
-        return { line, area, pts };
+        flush();
+        return { line: lines.join(' '), area: areas.join(' ') };
       }
-
-      const usdPath = showUsd ? buildPath('usdVal') : { line: '', area: '', pts: [] };
-      const krwPath = showKrw ? buildPath('krwVal') : { line: '', area: '', pts: [] };
-
-      // Target line (drawdown mode only, primary mode only)
+      const usdPath = showUsd ? buildPath(usdKey) : { line: '', area: '' };
+      const krwPath = showKrw ? buildPath(krwKey) : { line: '', area: '' };
       const yTarget = isDD && Number.isFinite(targetDd) ? getY(targetDd) : null;
-      const y0 = isDD ? getY(0) : null;
-      const clampedTargetY = Number.isFinite(yTarget) ? clamp(yTarget, 20, svgHeight - 26) : null;
 
-      function findNearestIndex(clientX) {
-        if (!wrapRef.current) return null;
-        const rect = wrapRef.current.getBoundingClientRect();
-        const x = clientX - rect.left;
-        const dataAreaWidth = rect.width * (1 - CHART_LABEL_WIDTH_PCT / 100);
-        const clampedX = Math.max(0, Math.min(dataAreaWidth, x));
-        const ratio = dataAreaWidth > 0 ? clampedX / dataAreaWidth : 0;
-        return Math.max(0, Math.min(chartData.length - 1, Math.round(ratio * (chartData.length - 1))));
+      function selectAt(clientX) {
+        if (!wrapRef.current) return;
+        const index = chartIndexAtPointer(model.rows, clientX, wrapRef.current.getBoundingClientRect());
+        if (index !== null) onSelectDate(model.rows[index].date);
       }
 
-      function handleClick(e) { if (lastTouchRef.current) return; setSelectedIndex(findNearestIndex(e.clientX)); }
-      function handleTouchStart(e) { if (!e.touches || !e.touches.length) return; lastTouchRef.current = true; setSelectedIndex(findNearestIndex(e.touches[0].clientX)); }
-      function handleTouchMove(e) { if (!e.touches || !e.touches.length) return; setSelectedIndex(findNearestIndex(e.touches[0].clientX)); }
-      function handleTouchEnd() { setTimeout(() => { lastTouchRef.current = false; }, 350); }
-
-      const sel = selectedIndex !== null ? chartData[selectedIndex] : null;
-      const selX = sel ? getX(selectedIndex) : null;
-
-      return (
-        <div>
-          <div
-            ref={wrapRef}
-            className="h-48 md:h-56 w-full relative rounded-xl overflow-hidden cursor-crosshair"
-            onClick={handleClick}
-            onTouchStart={handleTouchStart}
-            onTouchMove={handleTouchMove}
-            onTouchEnd={handleTouchEnd}
-          >
-            <svg viewBox={`0 0 ${svgWidth} ${svgHeight}`} className="w-full h-full" preserveAspectRatio="none">
-              {/* Target zone (DD mode) */}
-              {isDD && Number.isFinite(yTarget) && (
-                <rect x={0} y={yTarget} width={drawWidth} height={Math.max(0, svgHeight - padBottom - yTarget)} fill="#fee2e2" opacity="0.25" />
-              )}
-
-              {/* Area fills */}
-              {showUsd && usdPath.area && <path d={usdPath.area} fill="#e8f3ff" opacity="0.4" />}
-              {showKrw && krwPath.area && <path d={krwPath.area} fill="#e6f8f0" opacity="0.3" />}
-
-              {/* Zero line (DD mode) or base line (Price mode) */}
-              {isDD && y0 !== null && (
-                <line x1={0} y1={y0} x2={drawWidth} y2={y0} stroke="#e5e8eb" strokeWidth="2" strokeDasharray="4 4" vectorEffect="non-scaling-stroke" />
-              )}
-              {!isDD && (
-                <line x1={0} y1={getY(100)} x2={drawWidth} y2={getY(100)} stroke="#e5e8eb" strokeWidth="2" strokeDasharray="4 4" vectorEffect="non-scaling-stroke" />
-              )}
-
-              {/* Target line (DD mode) */}
-              {isDD && Number.isFinite(yTarget) && (
-                <line x1={0} y1={yTarget} x2={drawWidth} y2={yTarget} stroke="#f04452" strokeWidth="2" strokeDasharray="6 5" vectorEffect="non-scaling-stroke" />
-              )}
-
-              {/* Lines */}
-              {showUsd && usdPath.line && <path d={usdPath.line} fill="none" stroke="#3182f6" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />}
-              {showKrw && krwPath.line && <path d={krwPath.line} fill="none" stroke="#20c997" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />}
-
-              {/* Selection line */}
-              {sel && selX !== null && (
-                <>
-                  <line x1={selX} y1={padTop} x2={selX} y2={svgHeight - padBottom} stroke="#9ca3af" strokeWidth="1.5" strokeDasharray="3 4" vectorEffect="non-scaling-stroke" />
-                  {showUsd && sel.usdVal !== null && <circle cx={selX} cy={getY(sel.usdVal)} r="5" fill="#3182f6" />}
-                  {showKrw && sel.krwVal !== null && <circle cx={selX} cy={getY(sel.krwVal)} r="5" fill="#20c997" />}
-                </>
-              )}
-            </svg>
-
-            {/* Target label */}
-            {isDD && Number.isFinite(clampedTargetY) && (
-              <div className="absolute right-0.5 md:right-1 px-1.5 py-0.5 text-[10px] md:text-[11px] font-bold text-red-500 bg-white/95 rounded shadow-sm pointer-events-none leading-none" style={{ top: `calc(${toPct(clampedTargetY)} - 9px)` }}>
-                목표선 {formatPct1(targetDd)}
-              </div>
-            )}
-
-            {/* Price mode: 100 base label */}
-            {!isDD && (
-              <div className="absolute right-0.5 md:right-1 px-1.5 py-0.5 text-[10px] font-bold text-app-subtext bg-white/95 rounded shadow-sm pointer-events-none leading-none" style={{ top: `calc(${toPct(getY(100))} - 9px)` }}>
-                시작 = 100
-              </div>
-            )}
-          </div>
-
-          {/* Slider (DD mode only) - 부드러운 드래그 + 5% 스냅 */}
-          {isDD && onDdPctChange && (() => {
-            const snappedDisplay = Math.round(sliderDraft / 5) * 5;
-            const commit = () => { if (snappedDisplay !== currentDdPct) onDdPctChange(snappedDisplay); else setSliderDraft(snappedDisplay); };
-            return (
-              <div className="mt-3 bg-app-bg rounded-2xl px-4 py-4 border border-app-border">
-                <div className="flex items-center justify-between mb-3">
-                  <span className="text-xs font-bold text-app-subtext">추가매수 기준선 (최고점 대비)</span>
-                  <span className="text-base font-extrabold text-app-pink">{snappedDisplay}%</span>
-                </div>
-                <input type="range" min="-100" max="-5" step="1" value={sliderDraft}
-                  onChange={(e) => setSliderDraft(Number(e.target.value))}
-                  onMouseUp={commit}
-                  onTouchEnd={commit}
-                  onKeyUp={commit}
-                  className="w-full" />
-                <div className="flex justify-between text-[10px] text-app-subtext mt-2">
-                  <span>-100%</span><span>-5%</span>
-                </div>
-              </div>
-            );
-          })()}
-
-          {/* Touch info */}
-          {sel && (
-            <div className="mt-3 bg-white border border-gray-200 rounded-xl p-3 shadow-sm text-sm">
-              <div className="font-bold text-app-text mb-2">{sel.date}</div>
-              <div className="grid grid-cols-2 gap-2">
-                {showUsd && (
-                  <div className="bg-blue-50 rounded-lg p-2">
-                    <span className="text-xs text-app-blue font-bold">USD</span>
-                    <p className="font-bold text-app-text">{isDD ? formatPct(sel.usdDd) : (sel.usdPrice !== null ? formatNum(sel.usdPrice) : '-')}</p>
-                  </div>
-                )}
-                {showKrw && (
-                  <div className="bg-green-50 rounded-lg p-2">
-                    <span className="text-xs text-green-600 font-bold">KRW</span>
-                    <p className="font-bold text-app-text">{isDD ? formatPct(sel.krwDd) : (sel.krwPrice !== null ? formatKrw(sel.krwPrice) : '-')}</p>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          <p className="mt-2 text-xs text-app-subtext">차트를 터치/클릭하면 해당 날짜 정보를 확인합니다.</p>
+      return <div>
+        <div ref={wrapRef} className="h-56 w-full relative rounded-xl cursor-crosshair"
+          data-testid={`chart-${mode}`} role="group" aria-label={isDD ? '일별 낙폭 차트' : '일별 가격 지수 차트'}
+          onClick={e => { if (!lastTouchRef.current) selectAt(e.clientX); }}
+          onTouchStart={e => { if (e.touches.length) { lastTouchRef.current = true; selectAt(e.touches[0].clientX); } }}
+          onTouchMove={e => { if (e.touches.length) selectAt(e.touches[0].clientX); }}
+          onTouchEnd={() => { setTimeout(() => { lastTouchRef.current = false; }, 350); }}>
+          <svg viewBox={`0 0 ${g.width} ${g.height}`} className="w-full h-full" preserveAspectRatio="none" aria-hidden="true">
+            {ticks.map(v => <line key={v} x1={g.left} y1={getY(v)} x2={endX} y2={getY(v)} stroke="#dfe4ea" strokeDasharray="3 5" vectorEffect="non-scaling-stroke" />)}
+            {dateTicks.map(row => <line key={row.date} x1={getX(row)} y1={g.top} x2={getX(row)} y2={endY} stroke="#edf0f3" vectorEffect="non-scaling-stroke" />)}
+            {yTarget !== null && <rect x={g.left} y={yTarget} width={endX - g.left} height={Math.max(0, endY - yTarget)} fill="#fee2e2" opacity=".3" />}
+            {showUsd && <path d={usdPath.area} fill="#e8f3ff" opacity=".4" />}
+            {showKrw && <path d={krwPath.area} fill="#e6f8f0" opacity=".3" />}
+            {!isDD && <line x1={g.left} y1={getY(100)} x2={endX} y2={getY(100)} stroke="#b9c1cb" strokeDasharray="4 4" vectorEffect="non-scaling-stroke" />}
+            {yTarget !== null && <line x1={g.left} y1={yTarget} x2={endX} y2={yTarget} stroke="#f04452" strokeDasharray="6 5" vectorEffect="non-scaling-stroke" />}
+            {showUsd && <path data-series="USD" d={usdPath.line} fill="none" stroke="#3182f6" strokeWidth="2" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />}
+            {showKrw && <path data-series="KRW" d={krwPath.line} fill="none" stroke="#20c997" strokeWidth="2" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />}
+            {sel && <>
+              <line data-selection-date={sel.date} x1={getX(sel)} x2={getX(sel)} y1={g.top} y2={endY} stroke="#64748b" strokeDasharray="3 4" vectorEffect="non-scaling-stroke" />
+              {showUsd && Number.isFinite(sel[usdKey]) && <circle cx={getX(sel)} cy={getY(sel[usdKey])} r="5" fill="#3182f6" />}
+              {showKrw && Number.isFinite(sel[krwKey]) && <circle cx={getX(sel)} cy={getY(sel[krwKey])} r="5" fill="#20c997" />}
+            </>}
+          </svg>
+          {ticks.map(v => <span key={v} className="absolute left-0 pr-1 text-right text-[10px] text-app-subtext pointer-events-none -translate-y-1/2" style={{ top: topPct(getY(v)), width: `${g.left / g.width * 100}%` }}>{isDD ? `${Math.round(v * 100)}%` : formatNum(v)}</span>)}
+          {dateTicks.map(row => <span key={row.date} className="absolute text-[10px] text-app-subtext pointer-events-none -translate-x-1/2" style={{ top: topPct(endY + 9), left: `${getX(row) / g.width * 100}%` }}>{row.date.slice(0, 7)}</span>)}
+          <span className="absolute right-0 text-[10px] font-bold bg-white/95 px-1 rounded pointer-events-none -translate-y-1/2" style={{ top: topPct(getY(isDD ? targetDd || 0 : 100)), color: isDD ? '#f04452' : '#8B95A1' }}>{isDD ? `목표 ${formatPct1(targetDd)}` : '시작 = 100'}</span>
         </div>
-      );
+        {isDD && onDdPctChange && (() => {
+          const snappedDisplay = Math.round(sliderDraft / 5) * 5;
+          const commit = () => { if (snappedDisplay !== currentDdPct) onDdPctChange(snappedDisplay); else setSliderDraft(snappedDisplay); };
+          return <div className="mt-3 bg-app-bg rounded-2xl px-4 py-4 border border-app-border">
+            <div className="flex items-center justify-between mb-3"><span className="text-xs font-bold text-app-subtext">추가매수 기준선 (최고점 대비)</span><span className="text-base font-extrabold text-app-pink">{snappedDisplay}%</span></div>
+            <input aria-label="추가매수 기준 낙폭" type="range" min="-100" max="-5" step="1" value={sliderDraft} onChange={e => setSliderDraft(Number(e.target.value))} onMouseUp={commit} onTouchEnd={commit} onKeyUp={commit} className="w-full" />
+            <div className="flex justify-between text-[10px] text-app-subtext mt-2"><span>-100%</span><span>-5%</span></div>
+          </div>;
+        })()}
+        {sel && <div className="mt-3 bg-white border border-gray-200 rounded-xl p-3 text-sm" data-testid={`chart-info-${mode}`}>
+          <p className="font-bold text-app-text mb-2">{sel.date} · 원본 일별 데이터</p>
+          <div className="grid grid-cols-2 gap-2">
+            {showUsd && <div className="bg-blue-50 rounded-lg p-2"><span className="text-xs text-app-blue font-bold">USD</span><p className="font-bold">{isDD ? formatPct(sel.usdDd) : sel.usdPrice === null ? '데이터 없음' : '$' + formatNum(sel.usdPrice)}</p></div>}
+            {showKrw && <div className="bg-green-50 rounded-lg p-2"><span className="text-xs text-app-green font-bold">KRW</span><p className="font-bold">{isDD ? formatPct(sel.krwDd) : sel.krwPrice === null ? '데이터 없음' : formatKrw(sel.krwPrice)}</p></div>}
+          </div>
+        </div>}
+        <p className="mt-2 text-xs text-app-subtext">터치·클릭하면 두 차트가 같은 거래일을 표시합니다.</p>
+      </div>;
     }
+
 
     // -------------------------------------
     // Main App
@@ -1292,6 +1229,7 @@
       const [showDetailTable, setShowDetailTable] = useState(false);
       const [chartUsd, setChartUsd] = useState(true);
       const [chartKrw, setChartKrw] = useState(true);
+      const [selectedChartDate, setSelectedChartDate] = useState(null);
 
       // 토글 시 스크롤 위치 유지 (mobile Samsung Browser 점프 방지)
       function toggleWithScrollLock(setter, ref) {
@@ -1459,6 +1397,18 @@
           gates: { fearGate, ddGate, marketGate, finalSignal }
         };
       }, [rawData, settings, dataSource, meta, liveRating]);
+
+      const chartModel = useMemo(() => buildChartModel(
+        appState.usdEngine ? appState.usdEngine.timeSeries : null,
+        appState.krwEngine ? appState.krwEngine.timeSeries : null
+      ), [appState.usdEngine, appState.krwEngine]);
+
+      useEffect(() => { setSelectedChartDate(null); }, [settings.symbol, settings.startDate, settings.endDate, settings.currencyMode]);
+
+      function handleChartDateInput(e) {
+        const i = nearestChartIndex(chartModel.rows, Date.parse(e.target.value + 'T00:00:00Z'));
+        setSelectedChartDate(i === null ? null : chartModel.rows[i].date);
+      }
 
       function handleSettingChange(e) {
         const { name, value, type, checked } = e.target;
@@ -1814,19 +1764,31 @@
                   </button>
                 </div>
 
-                {/* 차트 2열: 낙폭 차트 + 주가 차트 */}
+                {chartModel.rows.length > 0 && <div className="rounded-xl bg-app-bg p-3 space-y-2">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <label className="text-xs font-bold text-app-text" htmlFor="chart-date">날짜 직접 조회</label>
+                    <input id="chart-date" aria-label="차트 조회 날짜" type="date"
+                      min={chartModel.rows[0].date} max={chartModel.rows[chartModel.rows.length - 1].date}
+                      value={selectedChartDate || ''}
+                      onInput={handleChartDateInput} onChange={handleChartDateInput}
+                      className="max-w-full rounded-lg border border-gray-200 bg-white px-2 py-1 text-sm" />
+                  </div>
+                  <p className="text-[11px] text-app-subtext">모든 거래일을 조회할 수 있습니다. 휴장일은 가장 가까운 거래일로 표시합니다. 가로축은 날짜 간격 기준입니다.</p>
+                </div>}
+
+                {/* 두 차트는 같은 원본 날짜와 가로축 좌표를 공유합니다. */}
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                   {/* 낙폭 차트 */}
                   <div className="p-4 rounded-xl border border-gray-100 bg-gray-50">
                     <h4 className="font-bold text-app-text mb-3 text-sm">📉 최고점 대비 하락률</h4>
                     <OverlayChart
-                      usdTimeSeries={appState.usdEngine ? appState.usdEngine.timeSeries : null}
-                      krwTimeSeries={appState.krwEngine ? appState.krwEngine.timeSeries : null}
+                      model={chartModel}
+                      selectedDate={selectedChartDate}
+                      onSelectDate={setSelectedChartDate}
                       showUsd={chartUsd}
                       showKrw={chartKrw}
                       mode="drawdown"
-                      targetDd={primary ? primary.target.dd : null}
-                      primaryMode={settings.primarySignalMode}
+                      targetDd={Number(settings.targetDdPct) / 100}
                       currentDdPct={settings.targetDdPct}
                       onDdPctChange={(newPct) => { setSettings(prev => ({ ...prev, targetDdPct: newPct })); }}
                     />
@@ -1836,8 +1798,9 @@
                   <div className="p-4 rounded-xl border border-gray-100 bg-gray-50">
                     <h4 className="font-bold text-app-text mb-3 text-sm">📈 가격 흐름 (시작 = 100 기준)</h4>
                     <OverlayChart
-                      usdTimeSeries={appState.usdEngine ? appState.usdEngine.timeSeries : null}
-                      krwTimeSeries={appState.krwEngine ? appState.krwEngine.timeSeries : null}
+                      model={chartModel}
+                      selectedDate={selectedChartDate}
+                      onSelectDate={setSelectedChartDate}
                       showUsd={chartUsd}
                       showKrw={chartKrw}
                       mode="price"
