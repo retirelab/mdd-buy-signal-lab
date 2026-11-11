@@ -151,7 +151,7 @@
   </div>
 
   <script src="./quote-tools.js?v=20261102.6"></script>
-  <script src="./indicator-tools.js?v=20261102.7"></script>
+  <script src="./indicator-tools.js?v=20261111.1"></script>
   <script type="text/babel" data-presets="react,env">
     const { useState, useMemo, useEffect, useRef } = React;
 
@@ -639,7 +639,7 @@
     // -------------------------------------
     // UI Components
     // -------------------------------------
-    const HISTORY_VERSION = '2026.11.02.7';
+    const HISTORY_VERSION = '2026.11.11.1';
 
     function HistoryMethodNote() {
       return <div className="rounded-xl bg-amber-50 p-4 text-xs leading-relaxed text-amber-800 space-y-2">
@@ -722,13 +722,86 @@
       </section>;
     }
 
-    function IndicatorPanel({ model, snapshot, source }) {
+    function MomentumPanel({ trend, confirmed, snapshot }) {
+      const [selectedDate,setSelectedDate] = useState(null);
+      const gestureRef = useRef(null);
+      const rows = useMemo(() => trend.rows.slice(-252), [trend]);
+      const last = rows[rows.length-1];
+      const selected = rows.find(r=>r.date===selectedDate) || last;
+      const money = n => n === null ? '데이터 부족' : '$'+n.toFixed(2);
+      const name = type => type === 'golden' ? '골든크로스' : '데드크로스';
+      const status = {above:'60일선이 200일선 위',below:'60일선이 200일선 아래',equal:'두 이동평균선이 같은 수준',insufficient:'200거래일 데이터 필요'}[trend.position];
+      const gapText = trend.gap===null ? '' : Math.abs(trend.gap)>1e-12 && Math.abs(trend.gap*100)<.01 ? '0.01% 미만' : `${trend.gap>=0?'+':''}${(trend.gap*100).toFixed(2)}%`;
+      const event = confirmed?.lastCross;
+      const tentative = snapshot && trend.lastCross?.date === trend.date && (trend.lastCross.date !== event?.date || trend.lastCross.type !== event?.type) ? trend.lastCross : null;
+      const drawing = useMemo(() => {
+        if (!rows.length) return null;
+        const width=600,height=220,left=65,right=12,top=14,bottom=28;
+        const values=rows.flatMap(r=>[r.price,r.sma60,r.sma200]).filter(Number.isFinite);
+        const low=Math.min(...values),high=Math.max(...values),pad=Math.max((high-low)*.1,high*.01);
+        const min=low-pad,max=high+pad;
+        const firstTime=Date.parse(rows[0].date),lastTime=Date.parse(rows[rows.length-1].date);
+        const x=r=>left+(Date.parse(r.date)-firstTime)/Math.max(1,lastTime-firstTime)*(width-left-right);
+        const y=v=>top+(max-v)/(max-min)*(height-top-bottom);
+        const path=key=>{let drawing=false;return rows.map(r=>{if(r[key]===null){drawing=false;return '';}const p=`${drawing?'L':'M'}${x(r).toFixed(2)},${y(r[key]).toFixed(2)}`;drawing=true;return p;}).join(' ');};
+        return {width,height,left,right,top,bottom,min,max,x,y,price:path('price'),fast:path('sma60'),slow:path('sma200')};
+      }, [rows]);
+      if (!last || !drawing) return null;
+      const d=drawing;
+      function selectAt(clientX,element) {
+        const rect=element.getBoundingClientRect();
+        const fraction=Math.max(0,Math.min(1,(clientX-rect.left-rect.width*d.left/d.width)/(rect.width*(d.width-d.left-d.right)/d.width)));
+        const time=Date.parse(rows[0].date)+fraction*(Date.parse(last.date)-Date.parse(rows[0].date));
+        const nearest=rows.reduce((a,b)=>Math.abs(Date.parse(b.date)-time)<Math.abs(Date.parse(a.date)-time)?b:a);
+        setSelectedDate(nearest.date);
+      }
+      function selectDate(value) {
+        if (!value) return;
+        const time=Date.parse(value);
+        const row=rows.reduce((a,b)=>Math.abs(Date.parse(b.date)-time)<Math.abs(Date.parse(a.date)-time)?b:a);
+        setSelectedDate(row.date);
+      }
+      return <section data-testid="momentum-panel" className="mt-4 rounded-2xl border border-gray-100 bg-gray-50 p-4">
+        <div className="flex flex-wrap justify-between items-center gap-2"><h4 className="text-sm font-bold">추세추종 모멘텀 · 60일 / 200일</h4><span className="text-[11px] text-app-subtext">USD · 단순이동평균</span></div>
+        <p className={`mt-3 text-lg font-bold ${trend.position==='above'?'text-app-blue':trend.position==='below'?'text-app-pink':'text-app-text'}`}>{status}</p>
+        <p className="mt-1 text-xs text-app-subtext">{snapshot?'조회 시세 기준 · 잠정':'종가 기록 기준'} · {trend.date}{trend.gap!==null ? ` · 두 선의 간격 ${gapText}` : ''}</p>
+        <div className="mt-3 grid grid-cols-2 gap-2 text-xs"><div className="rounded-xl bg-white p-3"><span className="text-amber-700 font-semibold">60일 평균</span><p className="mt-1 font-bold">{money(trend.sma60)}</p></div><div className="rounded-xl bg-white p-3"><span className="text-purple-700 font-semibold">200일 평균</span><p className="mt-1 font-bold">{money(trend.sma200)}</p></div></div>
+        <div className="mt-3 rounded-xl bg-white p-3 text-xs leading-relaxed" data-testid="momentum-cross">
+          <p className="font-semibold">종가 기록의 최근 교차</p>
+          <p>{event ? `${name(event.type)} · ${event.date} · 이후 ${event.tradingDaysAgo}거래일 경과` : confirmed?.position==='insufficient' ? '교차 판정에 필요한 종가가 부족합니다.' : '계산 가능한 기록 안에서 교차가 관측되지 않았습니다.'}</p>
+          {confirmed?.date && <p className="mt-1 text-[11px] text-app-subtext">기록 기준일 {confirmed.date}</p>}
+          {tentative && <p className="mt-2 font-semibold text-amber-700">조회 시세에서 {name(tentative.type)} 감지 · {tentative.date} · 잠정, 종가 확인 필요</p>}
+          {snapshot && event?.date===trend.date && (trend.lastCross?.date!==event.date || trend.lastCross?.type!==event.type) && <p className="mt-2 text-amber-700">조회 시세 판정이 저장된 종가 교차와 다릅니다. 종가 기록을 함께 확인하세요.</p>}
+        </div>
+        <div className="mt-4 flex flex-wrap gap-x-4 gap-y-1 text-[11px] font-semibold"><span className="text-app-blue">━ 가격</span><span className="text-amber-700">━ 60일선</span><span className="text-purple-700">┄ 200일선</span><span className="text-app-subtext">최근 최대 252거래일</span></div>
+        <div className="relative mt-2 h-48 sm:h-64 w-full rounded-lg bg-white"><svg data-testid="momentum-chart" viewBox={`0 0 ${d.width} ${d.height}`} className="h-full w-full" preserveAspectRatio="none" style={{touchAction:'pan-y'}} role="img" aria-label="달러 가격과 60일·200일 이동평균선. 차트 아래 날짜에서 일별 수치를 조회할 수 있습니다."
+          onPointerDown={e=>{if(e.button===0)gestureRef.current={x:e.clientX,y:e.clientY,horizontal:false};}}
+          onPointerMove={e=>{const g=gestureRef.current;if(!g)return;const dx=Math.abs(e.clientX-g.x),dy=Math.abs(e.clientY-g.y);if(!g.horizontal&&dy>8&&dy>dx){gestureRef.current=null;return;}if(dx>8&&dx>dy){g.horizontal=true;e.currentTarget.setPointerCapture(e.pointerId);}if(g.horizontal)selectAt(e.clientX,e.currentTarget);}}
+          onPointerUp={e=>{const g=gestureRef.current;if(g&&(g.horizontal||Math.abs(e.clientY-g.y)<8))selectAt(e.clientX,e.currentTarget);gestureRef.current=null;}} onPointerCancel={()=>{gestureRef.current=null;}}>
+          {[0,.5,1].map(f=>{const value=d.min+(d.max-d.min)*f;return <g key={f}><line x1={d.left} x2={d.width-d.right} y1={d.y(value)} y2={d.y(value)} stroke="#e5e7eb" strokeDasharray="3 4"/></g>;})}
+          <path data-ma-line="price" d={d.price} fill="none" stroke="#3182f6" strokeWidth="1.5"/>
+          <path data-ma-line="60" d={d.fast} fill="none" stroke="#b45309" strokeWidth="2"/>
+          <path data-ma-line="200" d={d.slow} fill="none" stroke="#7e22ce" strokeWidth="2" strokeDasharray="6 3"/>
+          {rows.filter(r=>r.cross).map(r=><circle key={r.date} cx={d.x(r)} cy={d.y(r.sma60)} r="4" fill={r.cross==='golden'?'#3182f6':'#FF477E'}><title>{name(r.cross)} {r.date}{snapshot&&r.date===trend.date?' · 잠정':''}</title></circle>)}
+          <line x1={d.x(selected)} x2={d.x(selected)} y1={d.top} y2={d.height-d.bottom} stroke="#94a3b8" strokeDasharray="3 4"/>
+          {[['price','#3182f6'],['sma60','#b45309'],['sma200','#7e22ce']].map(([key,color])=>selected[key]!==null&&<circle key={key} cx={d.x(selected)} cy={d.y(selected[key])} r="3" fill={color}/>)}
+        </svg>
+          {[0,.5,1].map(f=>{const value=d.min+(d.max-d.min)*f;return <span key={f} className="absolute left-0 pr-1 text-right text-[10px] text-app-subtext pointer-events-none -translate-y-1/2" style={{top:`${d.y(value)/d.height*100}%`,width:`${d.left/d.width*100}%`}}>{value.toFixed(0)}</span>;})}
+          <div className="absolute bottom-1 flex justify-between text-[10px] text-app-subtext pointer-events-none" style={{left:`${d.left/d.width*100}%`,right:`${d.right/d.width*100}%`}}><span>{rows[0].date}</span><span>{last.date}</span></div>
+        </div>
+        <div className="mt-3 rounded-xl bg-white p-3 text-xs" data-testid="momentum-info"><label className="flex flex-wrap items-center justify-between gap-2 font-semibold">날짜별 조회<input type="date" aria-label="모멘텀 조회 날짜" min={rows[0].date} max={last.date} value={selected.date} onChange={e=>selectDate(e.target.value)} onInput={e=>selectDate(e.currentTarget.value)} onBlur={e=>selectDate(e.currentTarget.value)} className="min-w-0 rounded-lg border border-gray-200 bg-white px-2 py-1"/></label><p className="mt-2 leading-relaxed">{selected.date}{snapshot&&selected.date===trend.date?' · 조회 시세 잠정':''}<br/>가격 {money(selected.price)} · 60일 {money(selected.sma60)} · 200일 {money(selected.sma200)}</p></div>
+        <details className="mt-3 text-xs leading-relaxed text-app-subtext"><summary className="cursor-pointer">골든·데드크로스 해석</summary><p className="mt-2">60일선이 200일선을 아래에서 위로 넘어가면 골든크로스, 위에서 아래로 내려가면 데드크로스입니다. 두 선이 닿기만 하고 원래 위치로 돌아오면 새 교차로 세지 않습니다. 현재 위·아래에 있는 상태와 교차 발생일은 다릅니다. 60·200거래일의 평균으로 계산하며 차트 앞의 가격도 포함합니다. 두 선의 간격은 (60일 평균 ÷ 200일 평균 − 1)입니다. 교차는 추세 전환의 참고 신호로, 반응이 늦거나 횡보 중 반복될 수 있습니다. 기존 낙폭·공포 조건과 별도로 표시합니다.</p></details>
+      </section>;
+    }
+
+    function IndicatorPanel({ model, snapshot, source, confirmedMomentum }) {
       if (!model) return <p className="mt-4 text-xs text-app-subtext">보조지표를 계산할 가격 데이터가 없습니다.</p>;
       const fixed = n => n === null ? '데이터 부족' : n.toFixed(1);
       const signed = n => n === null ? '데이터 부족' : `${n >= 0 ? '+' : ''}${(n*100).toFixed(1)}%`;
       const fx = model.fx;
       const cards = [
         {title:'RSI(14)', value:fixed(model.rsi), note:model.rsi === null ? '최소 15거래일의 가격이 필요합니다.' : model.rsi < 30 ? '30 미만 · 최근 하락 압력이 큰 구간' : model.rsi > 70 ? '70 초과 · 최근 상승 압력이 큰 구간' : '30~70 · 중간 구간', detail:'14거래일 Wilder 방식 · 0~100'},
+        {title:'60일 이동평균 대비', value:model.momentum.sma60===null?'데이터 부족':signed(model.momentum.rows.at(-1).price/model.momentum.sma60-1), note:model.momentum.sma60===null?'최소 60거래일의 가격이 필요합니다.':`60일 평균 $${model.momentum.sma60.toFixed(2)}`, detail:'최근 60거래일 단순이동평균 기준'},
         {title:'200일 이동평균 대비', value:signed(model.distance), note:model.sma === null ? `현재 ${model.count}거래일 · 200거래일 필요` : `200일 평균 $${model.sma.toFixed(2)} · 평균보다 ${model.distance >= 0 ? '위' : '아래'}`, detail:'최근 200거래일 단순이동평균 기준'},
         {title:'20일 변동성 위치', value:model.volPercentile === null ? '데이터 부족' : `${fixed(model.volPercentile)}백분위`, note:model.volatility === null ? '최소 21거래일의 가격이 필요합니다.' : `연환산 변동성 ${(model.volatility*100).toFixed(1)}% · ${model.volPercentile >= 80 ? '평소보다 큰 흔들림' : model.volPercentile <= 20 ? '평소보다 작은 흔들림' : '중간 수준의 흔들림'}`, detail:`${model.fullFiveYears ? '최근 5년' : '5년 미충족'} · 비교 ${model.volCount}거래일`},
         {title:'원·달러 환율 1년 내 위치', value:fx ? `${fixed(fx.position)}%` : '데이터 없음', note:fx ? `${fx.rate.toFixed(2)}원 · 낮을수록 달러 매입 부담 감소` : '공식 환율 기록을 불러오면 표시합니다.', detail:fx ? `${fx.fullYear ? '최근 1년' : '1년 미충족'} 저점 ${fx.low.toFixed(2)} ~ 고점 ${fx.high.toFixed(2)}원` : '환율 범위 내 위치 · 저점 0%, 고점 100%'}
@@ -737,6 +810,7 @@
         <div className="flex flex-wrap items-center justify-between gap-2 mb-2"><h3 className="text-sm font-bold">투자 판단 보조지표</h3><span className="text-xs text-app-subtext">가격 지표: USD 기준</span></div>
         <p className="mb-3 text-xs text-app-subtext">{source === 'SAMPLE' ? '샘플 데이터' : source === 'IMPORTED' ? '가져온 데이터' : snapshot ? '조회 시세로 잠정 계산' : '확정 종가 기준'} · 가격 기준일 {model.date}</p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">{cards.map(card=><div key={card.title} className="min-w-0 rounded-2xl border border-gray-100 bg-gray-50 p-4"><h4 className="text-xs font-semibold text-app-text">{card.title}</h4><p className="my-2 text-2xl font-bold text-app-text">{card.value}</p><p className="text-xs leading-relaxed text-app-text">{card.note}</p><p className="mt-2 text-[11px] leading-relaxed text-app-subtext">{card.detail}</p></div>)}</div>
+        <MomentumPanel trend={model.momentum} confirmed={confirmedMomentum} snapshot={snapshot} />
         {fx && <p className="mt-3 text-[11px] leading-relaxed text-app-subtext">환율 기준일 {fx.date}{fx.live ? ` · 조회 환율${fx.readAt ? ' · 조회 시각 '+new Date(fx.readAt).toLocaleString('ko-KR',{timeZone:'Asia/Seoul'})+' KST' : ''}` : ' · 저장된 일별 환율'} · 주가와 환율의 관측 시점은 다를 수 있습니다.</p>}
         <details className="mt-3 text-xs text-app-subtext"><summary className="cursor-pointer">지표 계산과 해석</summary><p className="mt-2 leading-relaxed">RSI는 최근 상승·하락의 상대 강도입니다. 변동성은 20개 일별 로그수익률의 표본 표준편차를 연환산(252거래일)하며, 백분위가 높을수록 비교 기간보다 흔들림이 큽니다. 환율 위치는 최근 1년 저점과 고점 사이의 위치이며 백분위와 다릅니다. 계산에는 선택한 차트 시작일 이전의 데이터도 사용합니다. 조회 시세를 반영한 값은 종가 확정 전 달라질 수 있습니다. 보조지표는 기존 2개 매수 조건의 통과 수에 포함되지 않습니다.</p></details>
       </div>;
@@ -1596,7 +1670,7 @@
         const updated = QuoteTools.applySnapshot(base,dataSource === 'FETCHED' ? screenQuote : null,'USD',rawData,settings.symbol);
         const snapshot = !!updated.quoteInfo;
         const liveFx = snapshot && screenQuote.fx ? {rate:screenQuote.fx,date:QuoteTools.marketDate(screenQuote.sourceReadAt || screenQuote.fetchedAt),readAt:screenQuote.sourceReadAt || screenQuote.fetchedAt} : null;
-        return {model:IndicatorTools.compute(updated.timeSeries,dataSource === 'FETCHED' ? indicatorFxRows : [],liveFx),snapshot};
+        return {model:IndicatorTools.compute(updated.timeSeries,dataSource === 'FETCHED' ? indicatorFxRows : [],liveFx),snapshot,confirmedMomentum:IndicatorTools.movingAverageTrend(series)};
       }, [rawData,indicatorFxRows,screenQuote,dataSource,settings.symbol,settings.endDate,settings.targetDdPct]);
 
       const historicalChartModel = useMemo(() => buildChartModel(
@@ -1899,7 +1973,7 @@
                   </Badge>
                 </div>
               </div>
-              <IndicatorPanel model={indicatorState.model} snapshot={indicatorState.snapshot} source={dataSource} />
+              <IndicatorPanel model={indicatorState.model} snapshot={indicatorState.snapshot} source={dataSource} confirmedMomentum={indicatorState.confirmedMomentum} />
             </Accordion>
 
             {/* ============ 3단계: 현재 시장은 어떤가요? ============ */}

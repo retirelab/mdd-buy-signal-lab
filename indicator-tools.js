@@ -34,6 +34,35 @@
     const eps = 1e-12;
     return values.length ? 100*(values.filter(v=>v<value-eps).length + values.filter(v=>Math.abs(v-value)<=eps).length/2)/values.length : null;
   }
+  function movingAverageTrend(priceRows) {
+    const prices = rowsOf(priceRows,'price');
+    let sum60 = 0, sum200 = 0, previousSide = 0;
+    const crosses = [];
+    const rows = prices.map((row,i) => {
+      sum60 += row.value;
+      sum200 += row.value;
+      if (i >= 60) sum60 -= prices[i-60].value;
+      if (i >= 200) sum200 -= prices[i-200].value;
+      const sma60 = i >= 59 ? sum60/60 : null;
+      const sma200 = i >= 199 ? sum200/200 : null;
+      const gap = sma200 === null ? null : sma60/sma200-1;
+      const side = gap === null || Math.abs(gap) <= 1e-12 ? 0 : gap > 0 ? 1 : -1;
+      let cross = null;
+      // A first observation is a position, not a crossover. Equality retains
+      // the last strict side so touching the line cannot create repeat events.
+      if (side && previousSide && side !== previousSide) {
+        cross = side > 0 ? 'golden' : 'death';
+        crosses.push({type:cross,date:row.date,index:i,sma60,sma200});
+      }
+      if (side) previousSide = side;
+      return {date:row.date,price:row.value,sma60,sma200,gap,cross};
+    });
+    const last = rows.at(-1);
+    const lastCross = crosses.at(-1);
+    return {rows,crosses,date:last?.date ?? null,sma60:last?.sma60 ?? null,sma200:last?.sma200 ?? null,
+      gap:last?.gap ?? null,position:last?.gap === null || !last ? 'insufficient' : Math.abs(last.gap)<=1e-12 ? 'equal' : last.gap>0 ? 'above' : 'below',
+      lastCross:lastCross ? {...lastCross,tradingDaysAgo:rows.length-1-lastCross.index} : null};
+  }
   function compute(priceRows, fxRows, liveFx = null) {
     const prices = rowsOf(priceRows,'price');
     const last = prices.at(-1);
@@ -64,9 +93,9 @@
       const low = Math.min(...window.map(r=>r.value)), high = Math.max(...window.map(r=>r.value));
       fxResult = {date:currentFx.date,rate:currentFx.value,low,high,position:high===low?50:100*(currentFx.value-low)/(high-low),count:window.length,fullYear:fx[0].date<=cutoff,live:!!fxLive,readAt:fxLive?liveFx.readAt:null};
     }
-    return {date:last.date,count:values.length,rsi:rsi(values),sma,distance:sma===null?null:last.value/sma-1,volatility:vol,volPercentile:vol===null?null:percentile(vol,comparison),volCount:comparison.length,fullFiveYears:!!volRows.length&&volRows[0].date<=fiveYearsAgo,fx:fxResult};
+    return {date:last.date,count:values.length,rsi:rsi(values),sma,distance:sma===null?null:last.value/sma-1,volatility:vol,volPercentile:vol===null?null:percentile(vol,comparison),volCount:comparison.length,fullFiveYears:!!volRows.length&&volRows[0].date<=fiveYearsAgo,fx:fxResult,momentum:movingAverageTrend(priceRows)};
   }
-  const api = {compute,rsi,volatility,percentile,yearsBefore};
+  const api = {compute,rsi,volatility,percentile,yearsBefore,movingAverageTrend};
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.IndicatorTools = api;
 })(typeof window === 'undefined' ? globalThis : window);
