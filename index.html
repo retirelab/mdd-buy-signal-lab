@@ -85,6 +85,9 @@
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script crossorigin src="https://unpkg.com/@babel/standalone@7.26.7/babel.min.js"></script>
 
+  <script src="https://unpkg.com/lightweight-charts@5.1.0/dist/lightweight-charts.standalone.production.js"></script>
+  <script src="./chart-terminal.js?v=20261111.4"></script>
+
   <style>
     body {
       background-color: #F9FAFB;
@@ -92,6 +95,24 @@
       color: #333D4B;
       -webkit-font-smoothing: antialiased;
     }
+
+    .terminal-shell { border:1px solid #dce2ea; border-radius:14px; background:#fff; overflow:hidden; box-shadow:0 3px 14px rgba(15,23,42,.035); }
+    .terminal-toolbar { display:flex; flex-wrap:wrap; justify-content:space-between; align-items:center; gap:10px; padding:12px 12px 8px; }
+    .terminal-legend { display:flex; flex-wrap:wrap; align-items:center; gap:8px; min-width:0; }
+    .terminal-series-label,.terminal-series-toggle { display:inline-flex; align-items:center; gap:5px; font-size:11px; white-space:nowrap; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+    .terminal-series-toggle { padding:5px 7px; border:1px solid currentColor; border-radius:6px; background:#fff; }
+    .terminal-series-toggle.muted { opacity:.45; }
+    .terminal-dot { width:6px; height:6px; border-radius:50%; display:inline-block; }
+    .terminal-controls { display:flex; flex-wrap:wrap; align-items:center; gap:3px; }
+    .terminal-button { padding:5px 8px; border:1px solid #e2e8f0; border-radius:6px; background:#fff; color:#64748b; font-size:10px; font-weight:600; }
+    .terminal-button:hover { background:#f1f5f9; }
+    .terminal-button:disabled { opacity:.45; cursor:wait; }
+    .terminal-button.active { background:#eff6ff; color:#2563eb; border-color:#93c5fd; }
+    .terminal-status { display:flex; justify-content:space-between; flex-wrap:wrap; gap:6px; padding:0 12px 10px; color:#94a3b8; font:10px ui-monospace,SFMono-Regular,Menlo,monospace; }
+    .terminal-canvas { position:relative; width:100%; min-width:0; }
+    .terminal-hint { display:flex; justify-content:space-between; flex-wrap:wrap; gap:5px; padding:8px 12px; color:#94a3b8; font-size:10px; border-top:1px solid #edf0f4; }
+    @media(max-height:500px) { .chart-dialog .terminal-canvas { height:max(180px,calc(100dvh - 200px)) !important; } }
+    @media(max-width:480px) { .terminal-button,.terminal-series-toggle { min-height:32px; } .terminal-toolbar{padding:10px 8px 8px;} .terminal-legend{gap:6px;} .terminal-series-label,.terminal-series-toggle{font-size:10px;} }
 
     .chart-dialog { position:fixed; inset:0; margin:0; padding:0; border:0; width:100vw; height:100dvh; max-width:none; max-height:none; box-sizing:border-box; overflow:hidden; }
     .chart-dialog::backdrop { background:rgba(15,23,42,.55); }
@@ -643,7 +664,7 @@
     // -------------------------------------
     // UI Components
     // -------------------------------------
-    const HISTORY_VERSION = '2026.11.11.3';
+    const HISTORY_VERSION = '2026.11.11.4';
 
     function HistoryMethodNote() {
       return <div className="rounded-xl bg-amber-50 p-4 text-xs leading-relaxed text-amber-800 space-y-2">
@@ -788,11 +809,19 @@
       </div>;
     }
 
+    const TerminalPlot = ChartTerminal.Plot;
+
     function MomentumPanel({ trend, confirmed, snapshot, startDate, endDate }) {
       const [selectedDate,setSelectedDate] = useState(null);
       const gestureRef = useRef(null);
       const rows = useMemo(() => IndicatorTools.momentumRowsInRange(trend, startDate, endDate), [trend, startDate, endDate]);
       useEffect(() => { setSelectedDate(null); }, [startDate, endDate]);
+      const terminalSeries=useMemo(()=>ChartTerminal.prepareSeries(rows,[
+        {id:'price',key:'price',label:'가격',color:'#2563eb',width:2},
+        {id:'MA60',key:'sma60',label:'SMA 60',color:'#ef4444',width:1,toggleable:true},
+        {id:'MA200',key:'sma200',label:'SMA 200',color:'#a855f7',width:1,toggleable:true}
+      ]),[rows]);
+      const terminalMarkers=useMemo(()=>rows.filter(r=>r.cross).map(r=>({seriesId:'MA60',date:r.date,color:r.cross==='golden'?'#2563eb':'#f43f5e',text:r.cross==='golden'?'골든':'데드'})),[rows]);
       const last = rows[rows.length-1];
       const selected = rows.find(r=>r.date===selectedDate) || last;
       const money = n => n === null ? '데이터 부족' : '$'+n.toFixed(2);
@@ -832,7 +861,7 @@
         <div className="flex flex-wrap justify-between items-center gap-2"><h4 className="text-sm font-bold">추세추종 모멘텀 · 60일 / 200일</h4><span className="text-[11px] text-app-subtext">USD · 단순이동평균</span></div>
         <p className={`mt-3 text-lg font-bold ${trend.position==='above'?'text-app-blue':trend.position==='below'?'text-app-pink':'text-app-text'}`}>{status}</p>
         <p className="mt-1 text-xs text-app-subtext">{snapshot?'조회 시세 기준 · 잠정':'종가 기록 기준'} · {trend.date}{trend.gap!==null ? ` · 두 선의 간격 ${gapText}` : ''}</p>
-        <div className="mt-3 grid grid-cols-2 gap-2 text-xs"><div className="rounded-xl bg-white p-3"><span className="text-amber-700 font-semibold">60일 평균</span><p className="mt-1 font-bold">{money(trend.sma60)}</p></div><div className="rounded-xl bg-white p-3"><span className="text-purple-700 font-semibold">200일 평균</span><p className="mt-1 font-bold">{money(trend.sma200)}</p></div></div>
+        <div className="mt-3 grid grid-cols-2 gap-2 text-xs"><div className="rounded-xl bg-white p-3"><span className="text-red-500 font-semibold">60일 평균</span><p className="mt-1 font-bold">{money(trend.sma60)}</p></div><div className="rounded-xl bg-white p-3"><span className="text-purple-700 font-semibold">200일 평균</span><p className="mt-1 font-bold">{money(trend.sma200)}</p></div></div>
         <div className="mt-3 rounded-xl bg-white p-3 text-xs leading-relaxed" data-testid="momentum-cross">
           <p className="font-semibold">종가 기록의 최근 교차</p>
           <p>{event ? `${name(event.type)} · ${event.date} · 이후 ${event.tradingDaysAgo}거래일 경과` : confirmed?.position==='insufficient' ? '교차 판정에 필요한 종가가 부족합니다.' : '계산 가능한 기록 안에서 교차가 관측되지 않았습니다.'}</p>
@@ -841,23 +870,23 @@
           {snapshot && event?.date===trend.date && (trend.lastCross?.date!==event.date || trend.lastCross?.type!==event.type) && <p className="mt-2 text-amber-700">조회 시세 판정이 저장된 종가 교차와 다릅니다. 종가 기록을 함께 확인하세요.</p>}
         </div>
         <ChartViewer title="60일·200일 이동평균 차트">{expanded=><div>
-        <div className="mt-4 flex flex-wrap gap-x-4 gap-y-1 text-[11px] font-semibold"><span className="text-app-blue">━ 가격</span><span className="text-amber-700">━ 60일선</span><span className="text-purple-700">┄ 200일선</span><span className="text-app-subtext">선택 기간 · {rows.length.toLocaleString()}거래일</span></div>
-        <p className="mt-2 text-[11px] text-app-subtext" data-testid="momentum-range">표시 기간 {rows[0].date} ~ {last.date}</p>
-        <div className="relative mt-2 h-48 sm:h-64 w-full rounded-lg bg-white" style={expanded?{height:"max(260px, calc(100dvh - 260px))"}:undefined}><svg data-testid="momentum-chart" viewBox={`0 0 ${d.width} ${d.height}`} className="h-full w-full" preserveAspectRatio="none" style={{touchAction:'pan-y'}} role="img" aria-label="달러 가격과 60일·200일 이동평균선. 차트 아래 날짜에서 일별 수치를 조회할 수 있습니다."
+        <div className="hidden mt-4 flex flex-wrap gap-x-4 gap-y-1 text-[11px] font-semibold"><span className="text-app-blue">━ 가격</span><span className="text-amber-700">━ 60일선</span><span className="text-purple-700">┄ 200일선</span><span className="text-app-subtext">선택 기간 · {rows.length.toLocaleString()}거래일</span></div>
+        <p className="mt-2 text-[11px] text-app-subtext" data-testid="momentum-range">선택 기간 {rows[0].date} ~ {last.date}</p>
+        <TerminalPlot series={terminalSeries} markers={terminalMarkers} selectedDate={selected.date} onSelectDate={setSelectedDate} kind="usd" expanded={expanded} testId="terminal-momentum" label="이동평균 금융 차트" height={expanded?'max(320px, calc(100dvh - 300px))':undefined} fallback={<div className="relative mt-2 h-48 sm:h-64 w-full rounded-lg bg-white" style={expanded?{height:"max(260px, calc(100dvh - 260px))"}:undefined}><svg data-testid="momentum-chart" viewBox={`0 0 ${d.width} ${d.height}`} className="h-full w-full" preserveAspectRatio="none" style={{touchAction:'pan-y'}} role="img" aria-label="달러 가격과 60일·200일 이동평균선. 차트 아래 날짜에서 일별 수치를 조회할 수 있습니다."
           onPointerDown={e=>{if(e.button===0)gestureRef.current={x:e.clientX,y:e.clientY,horizontal:false};}}
           onPointerMove={e=>{const g=gestureRef.current;if(!g)return;const dx=Math.abs(e.clientX-g.x),dy=Math.abs(e.clientY-g.y);if(!g.horizontal&&dy>8&&dy>dx){gestureRef.current=null;return;}if(dx>8&&dx>dy){g.horizontal=true;e.currentTarget.setPointerCapture(e.pointerId);}if(g.horizontal)selectAt(e.clientX,e.currentTarget);}}
           onPointerUp={e=>{const g=gestureRef.current;if(g&&(g.horizontal||Math.abs(e.clientY-g.y)<8))selectAt(e.clientX,e.currentTarget);gestureRef.current=null;}} onPointerCancel={()=>{gestureRef.current=null;}}>
           {[0,.5,1].map(f=>{const value=d.min+(d.max-d.min)*f;return <g key={f}><line x1={d.left} x2={d.width-d.right} y1={d.y(value)} y2={d.y(value)} stroke="#e5e7eb" strokeDasharray="3 4"/></g>;})}
           <path data-ma-line="price" d={d.price} fill="none" stroke="#3182f6" strokeWidth="1.5"/>
-          <path data-ma-line="60" d={d.fast} fill="none" stroke="#b45309" strokeWidth="2"/>
+          <path data-ma-line="60" d={d.fast} fill="none" stroke="#ef4444" strokeWidth="2"/>
           <path data-ma-line="200" d={d.slow} fill="none" stroke="#7e22ce" strokeWidth="2" strokeDasharray="6 3"/>
           {rows.filter(r=>r.cross).map(r=><circle key={r.date} cx={d.x(r)} cy={d.y(r.sma60)} r="4" fill={r.cross==='golden'?'#3182f6':'#FF477E'}><title>{name(r.cross)} {r.date}{snapshot&&r.date===trend.date?' · 잠정':''}</title></circle>)}
           <line x1={d.x(selected)} x2={d.x(selected)} y1={d.top} y2={d.height-d.bottom} stroke="#94a3b8" strokeDasharray="3 4"/>
-          {[['price','#3182f6'],['sma60','#b45309'],['sma200','#7e22ce']].map(([key,color])=>selected[key]!==null&&<circle key={key} cx={d.x(selected)} cy={d.y(selected[key])} r="3" fill={color}/>)}
+          {[['price','#3182f6'],['sma60','#ef4444'],['sma200','#7e22ce']].map(([key,color])=>selected[key]!==null&&<circle key={key} cx={d.x(selected)} cy={d.y(selected[key])} r="3" fill={color}/>)}
         </svg>
           {[0,.5,1].map(f=>{const value=d.min+(d.max-d.min)*f;return <span key={f} className="absolute left-0 pr-1 text-right text-[10px] text-app-subtext pointer-events-none -translate-y-1/2" style={{top:`${d.y(value)/d.height*100}%`,width:`${d.left/d.width*100}%`}}>{value.toFixed(0)}</span>;})}
           <div className="absolute bottom-1 flex justify-between text-[10px] text-app-subtext pointer-events-none" style={{left:`${d.left/d.width*100}%`,right:`${d.right/d.width*100}%`}}><span>{rows[0].date}</span>{rows.length>1 && <span>{new Date((Date.parse(rows[0].date)+Date.parse(last.date))/2).toISOString().slice(0,7)}</span>}<span>{last.date}</span></div>
-        </div>
+        </div>} />
         <div className="mt-3 rounded-xl bg-white p-3 text-xs" data-testid="momentum-info"><label className="flex flex-wrap items-center justify-between gap-2 font-semibold">날짜별 조회<input type="date" aria-label="모멘텀 조회 날짜" min={rows[0].date} max={last.date} value={selected.date} onChange={e=>selectDate(e.target.value)} onInput={e=>selectDate(e.currentTarget.value)} onBlur={e=>selectDate(e.currentTarget.value)} className="min-w-0 rounded-lg border border-gray-200 bg-white px-2 py-1"/></label><p className="mt-2 leading-relaxed">{selected.date}{snapshot&&selected.date===trend.date?' · 조회 시세 잠정':''}<br/>가격 {money(selected.price)} · 60일 {money(selected.sma60)} · 200일 {money(selected.sma200)}</p></div>
         </div>}</ChartViewer>
         <details className="mt-3 text-xs leading-relaxed text-app-subtext"><summary className="cursor-pointer">골든·데드크로스 해석</summary><p className="mt-2">60일선이 200일선을 아래에서 위로 넘어가면 골든크로스, 위에서 아래로 내려가면 데드크로스입니다. 두 선이 닿기만 하고 원래 위치로 돌아오면 새 교차로 세지 않습니다. 현재 위·아래에 있는 상태와 교차 발생일은 다릅니다. 60·200거래일의 평균으로 계산하며 차트 앞의 가격도 포함합니다. 두 선의 간격은 (60일 평균 ÷ 200일 평균 − 1)입니다. 교차는 추세 전환의 참고 신호로, 반응이 늦거나 횡보 중 반복될 수 있습니다. 기존 낙폭·공포 조건과 별도로 표시합니다.</p></details>
@@ -1402,6 +1431,15 @@
       const krwPath = showKrw ? buildPath(krwKey) : { line: '', area: '' };
       return { g, endX, endY, first, last, getX, getY, topPct, ticks, dateTicks, usdKey, krwKey, usdPath, krwPath };
       }, [model, showUsd, showKrw, isDD, previewTarget]);
+      const terminalSeries=useMemo(()=>ChartTerminal.prepareSeries(model.rows,[
+        ...(showUsd?[{id:'USD',key:isDD?'usdDd':'usdIndex',label:'USD',color:'#2563eb',width:2}]:[]),
+        ...(showKrw?[{id:'KRW',key:isDD?'krwDd':'krwIndex',label:'KRW',color:'#10b981',width:2}]:[])
+      ]),[model,showUsd,showKrw,isDD]);
+      const terminalMarkers=useMemo(()=>[
+        ...markers.map(m=>({seriesId:episodeMode==='KRW'?'KRW':'USD',date:m.date,color:m.color,text:m.label})),
+        ...['USD','KRW'].filter(mode=>model.rows.at(-1)?.[mode==='USD'?'usdSnapshot':'krwSnapshot']).map(mode=>({seriesId:mode,date:model.rows.at(-1).date,color:mode==='USD'?'#2563eb':'#10b981',text:'조회'}))
+      ],[model,markers,episodeMode]);
+      const terminalReferences=useMemo(()=>isDD?[{value:previewTarget,color:'#f43f5e',title:'목표'},{value:0,color:'#94a3b8',title:'전고점'}]:[{value:100,color:'#94a3b8',title:'시작'}],[isDD,previewTarget]);
       if (!drawing) return <div className="h-48 text-sm text-app-subtext">차트 데이터 없음</div>;
       const { g, endX, endY, getX, getY, topPct, ticks, dateTicks, usdKey, krwKey, usdPath, krwPath } = drawing;
       const yTarget = isDD && Number.isFinite(previewTarget) ? getY(previewTarget) : null;
@@ -1420,7 +1458,7 @@
       }
       return <ChartViewer title={chartTitle}>{expanded=><div>
         {expanded && <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-xs"><span>{model.rows[0].date} ~ {model.rows[model.rows.length-1].date} · {showUsd?'USD ':''}{showKrw?'KRW':''}</span><label>날짜 조회 <input type="date" aria-label={`${chartTitle} 확대 날짜`} min={model.rows[0].date} max={model.rows[model.rows.length-1].date} value={sel?.date||model.rows[model.rows.length-1].date} onChange={e=>selectDate(e.target.value)} onInput={e=>selectDate(e.currentTarget.value)} onBlur={e=>selectDate(e.currentTarget.value)} className="rounded-lg border border-gray-200 px-2 py-1"/></label></div>}
-        <div ref={wrapRef} className="h-56 w-full relative rounded-xl cursor-crosshair"
+        <TerminalPlot series={terminalSeries} markers={terminalMarkers} references={terminalReferences} selectedDate={selectedDate} onSelectDate={onSelectDate} kind={isDD?'percent':'number'} expanded={expanded} testId={`terminal-${mode}`} label={isDD?'낙폭 금융 차트':'가격 지수 금융 차트'} height={expanded?(isDD?'max(300px, calc(100dvh - 440px))':'max(320px, calc(100dvh - 340px))'):undefined} fallback={<div ref={wrapRef} className="h-56 w-full relative rounded-xl cursor-crosshair"
           data-testid={`chart-${mode}`} role="group" aria-label={isDD ? '일별 낙폭 차트' : '일별 가격 지수 차트'}
           style={{ touchAction: 'pan-y',...(expanded?{height:isDD?'max(260px, calc(100dvh - 390px))':'max(260px, calc(100dvh - 280px))'}:{}) }}
           onPointerDown={e => { if (e.button === 0) gestureRef.current = { x: e.clientX, y: e.clientY, horizontal: false }; }}
@@ -1469,7 +1507,7 @@
           {ticks.map(v => <span key={v} className="absolute left-0 pr-1 text-right text-[10px] text-app-subtext pointer-events-none -translate-y-1/2" style={{ top: topPct(getY(v)), width: `${g.left / g.width * 100}%` }}>{isDD ? `${Math.round(v * 100)}%` : formatNum(v)}</span>)}
           {dateTicks.map(row => <span key={row.date} className="absolute text-[10px] text-app-subtext pointer-events-none -translate-x-1/2" style={{ top: topPct(endY + 9), left: `${getX(row) / g.width * 100}%` }}>{row.date.slice(0, 7)}</span>)}
           <span className="absolute right-0 text-[10px] font-bold bg-white/95 px-1 rounded pointer-events-none -translate-y-1/2" style={{ top: topPct(getY(isDD ? previewTarget || 0 : 100)), color: isDD ? '#f04452' : '#8B95A1' }}>{isDD ? `목표 ${formatPct1(previewTarget)}` : '시작 = 100'}</span>
-        </div>
+        </div>} />
         {isDD && onDdPctChange && (() => {
           const snappedDisplay = Math.round(sliderDraft / 5) * 5;
           const commit = () => { if (snappedDisplay !== currentDdPct) onDdPctChange(snappedDisplay); else setSliderDraft(snappedDisplay); };
@@ -2111,7 +2149,7 @@
                       onInput={handleChartDateInput} onChange={handleChartDateInput}
                       className="max-w-full rounded-lg border border-gray-200 bg-white px-2 py-1 text-sm" />
                   </div>
-                  <p className="text-[11px] text-app-subtext">모든 거래일을 조회할 수 있습니다. 휴장일은 가장 가까운 거래일로 표시합니다. 가로축은 날짜 간격 기준입니다.</p>
+                  <p className="text-[11px] text-app-subtext">모든 거래일을 조회할 수 있습니다. 휴장일은 가장 가까운 거래일로 표시합니다. 실제 거래일 자료를 기준으로 표시합니다.</p>
                 </div>}
 
                 {/* 두 차트는 같은 원본 날짜와 가로축 좌표를 공유합니다. */}
@@ -2548,7 +2586,7 @@
               {activeTab === 'settings' && renderSettings()}
               {activeTab === 'guide' && renderGuide()}
             </main>
-            <p className="pb-4 text-center text-[10px] text-app-subtext">v{HISTORY_VERSION}</p>
+            <p className="pb-4 text-center text-[10px] text-app-subtext">v{HISTORY_VERSION}<br /><a href="https://www.tradingview.com/" target="_blank" rel="noopener noreferrer">TradingView Lightweight Charts™</a> · Copyright (с) 2025 TradingView, Inc.</p>
           </div>
         </div>
       );
