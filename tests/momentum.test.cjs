@@ -56,3 +56,35 @@ test('calendar gaps count observed trading sessions, duplicate dates cannot add 
  assert.equal(m.lastCross.tradingDaysAgo,m.rows.length-1-m.lastCross.index);
  assert.equal(JSON.stringify(duplicated),before);
 });
+
+test('chart range follows 1/3/5/10 year and maximum windows instead of a fixed 252 rows',()=>{
+ const values=Array.from({length:5000},(_,i)=>100+i*.01+Math.sin(i/20));
+ const trend=I.movingAverageTrend(prices(values));
+ const last=trend.rows.at(-1).date;
+ const selected=[1,3,5,10].map(years=>I.momentumRowsInRange(trend,I.yearsBefore(last,years),last));
+ for(let i=0;i<selected.length;i++){
+  const start=I.yearsBefore(last,[1,3,5,10][i]);
+  assert.ok(selected[i][0].date>=start);
+  assert.equal(selected[i].at(-1).date,last);
+  if(i) assert.ok(selected[i].length>selected[i-1].length);
+ }
+ const all=I.momentumRowsInRange(trend,'1900-01-01','2099-12-31');
+ assert.equal(all.length,5000);assert.equal(all[0].date,trend.rows[0].date);
+});
+test('cropping the chart preserves averages and crossovers calculated with earlier data',()=>{
+ const trend=I.movingAverageTrend(prices([...seed,...Array(40).fill(20)]));
+ const before=JSON.stringify(trend);
+ const visible=I.momentumRowsInRange(trend,trend.rows[210].date,trend.rows[220].date);
+ assert.equal(visible.length,11);near(visible[0].sma60,trend.rows[210].sma60);
+ near(visible[0].sma200,trend.rows[210].sma200);
+ assert.equal(visible.find(r=>r.cross)?.date,trend.rows[213].date);
+ assert.equal(JSON.stringify(trend),before);
+});
+test('range cutoff handles one day, out-of-data dates and custom end dates',()=>{
+ const trend=I.movingAverageTrend(prices(seed));const date=trend.rows.at(-1).date;
+ assert.equal(I.momentumRowsInRange(trend,date,date).length,1);
+ assert.equal(I.momentumRowsInRange(trend,'2030-01-01','2031-01-01').length,0);
+ assert.equal(I.momentumRowsInRange(trend,'2030-01-01','2020-01-01').length,0);
+ assert.equal(I.momentumRowsInRange(trend,null,trend.rows[99].date).length,100);
+ assert.deepEqual(I.momentumRowsInRange(null),[]);
+});

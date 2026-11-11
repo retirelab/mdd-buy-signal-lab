@@ -63,6 +63,11 @@
       gap:last?.gap ?? null,position:last?.gap === null || !last ? 'insufficient' : Math.abs(last.gap)<=1e-12 ? 'equal' : last.gap>0 ? 'above' : 'below',
       lastCross:lastCross ? {...lastCross,tradingDaysAgo:rows.length-1-lastCross.index} : null};
   }
+  // Crop an already calculated trend. Never restart MA warmup at chart start.
+  function momentumRowsInRange(trend, startDate, endDate) {
+    const start = startDate || '0000-01-01', end = endDate || '9999-12-31';
+    return (trend?.rows || []).filter(row => row.date >= start && row.date <= end);
+  }
   function compute(priceRows, fxRows, liveFx = null) {
     const prices = rowsOf(priceRows,'price');
     const last = prices.at(-1);
@@ -95,7 +100,7 @@
     }
     return {date:last.date,count:values.length,rsi:rsi(values),sma,distance:sma===null?null:last.value/sma-1,volatility:vol,volPercentile:vol===null?null:percentile(vol,comparison),volCount:comparison.length,fullFiveYears:!!volRows.length&&volRows[0].date<=fiveYearsAgo,fx:fxResult,momentum:movingAverageTrend(priceRows)};
   }
-  const api = {compute,rsi,volatility,percentile,yearsBefore,movingAverageTrend};
+  const api = {compute,rsi,volatility,percentile,yearsBefore,movingAverageTrend,momentumRowsInRange};
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.IndicatorTools = api;
 })(typeof window === 'undefined' ? globalThis : window);

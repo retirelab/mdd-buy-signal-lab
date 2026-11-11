@@ -151,7 +151,7 @@
   </div>
 
   <script src="./quote-tools.js?v=20261102.6"></script>
-  <script src="./indicator-tools.js?v=20261111.1"></script>
+  <script src="./indicator-tools.js?v=20261111.2"></script>
   <script type="text/babel" data-presets="react,env">
     const { useState, useMemo, useEffect, useRef } = React;
 
@@ -639,7 +639,7 @@
     // -------------------------------------
     // UI Components
     // -------------------------------------
-    const HISTORY_VERSION = '2026.11.11.1';
+    const HISTORY_VERSION = '2026.11.11.2';
 
     function HistoryMethodNote() {
       return <div className="rounded-xl bg-amber-50 p-4 text-xs leading-relaxed text-amber-800 space-y-2">
@@ -722,10 +722,11 @@
       </section>;
     }
 
-    function MomentumPanel({ trend, confirmed, snapshot }) {
+    function MomentumPanel({ trend, confirmed, snapshot, startDate, endDate }) {
       const [selectedDate,setSelectedDate] = useState(null);
       const gestureRef = useRef(null);
-      const rows = useMemo(() => trend.rows.slice(-252), [trend]);
+      const rows = useMemo(() => IndicatorTools.momentumRowsInRange(trend, startDate, endDate), [trend, startDate, endDate]);
+      useEffect(() => { setSelectedDate(null); }, [startDate, endDate]);
       const last = rows[rows.length-1];
       const selected = rows.find(r=>r.date===selectedDate) || last;
       const money = n => n === null ? '데이터 부족' : '$'+n.toFixed(2);
@@ -746,7 +747,7 @@
         const path=key=>{let drawing=false;return rows.map(r=>{if(r[key]===null){drawing=false;return '';}const p=`${drawing?'L':'M'}${x(r).toFixed(2)},${y(r[key]).toFixed(2)}`;drawing=true;return p;}).join(' ');};
         return {width,height,left,right,top,bottom,min,max,x,y,price:path('price'),fast:path('sma60'),slow:path('sma200')};
       }, [rows]);
-      if (!last || !drawing) return null;
+      if (!last || !drawing) return <section className="mt-4 rounded-2xl border border-gray-100 p-4 text-xs text-app-subtext">추세추종 모멘텀 · 선택한 기간에 표시할 가격 데이터가 없습니다.</section>;
       const d=drawing;
       function selectAt(clientX,element) {
         const rect=element.getBoundingClientRect();
@@ -773,7 +774,8 @@
           {tentative && <p className="mt-2 font-semibold text-amber-700">조회 시세에서 {name(tentative.type)} 감지 · {tentative.date} · 잠정, 종가 확인 필요</p>}
           {snapshot && event?.date===trend.date && (trend.lastCross?.date!==event.date || trend.lastCross?.type!==event.type) && <p className="mt-2 text-amber-700">조회 시세 판정이 저장된 종가 교차와 다릅니다. 종가 기록을 함께 확인하세요.</p>}
         </div>
-        <div className="mt-4 flex flex-wrap gap-x-4 gap-y-1 text-[11px] font-semibold"><span className="text-app-blue">━ 가격</span><span className="text-amber-700">━ 60일선</span><span className="text-purple-700">┄ 200일선</span><span className="text-app-subtext">최근 최대 252거래일</span></div>
+        <div className="mt-4 flex flex-wrap gap-x-4 gap-y-1 text-[11px] font-semibold"><span className="text-app-blue">━ 가격</span><span className="text-amber-700">━ 60일선</span><span className="text-purple-700">┄ 200일선</span><span className="text-app-subtext">선택 기간 · {rows.length.toLocaleString()}거래일</span></div>
+        <p className="mt-2 text-[11px] text-app-subtext" data-testid="momentum-range">표시 기간 {rows[0].date} ~ {last.date}</p>
         <div className="relative mt-2 h-48 sm:h-64 w-full rounded-lg bg-white"><svg data-testid="momentum-chart" viewBox={`0 0 ${d.width} ${d.height}`} className="h-full w-full" preserveAspectRatio="none" style={{touchAction:'pan-y'}} role="img" aria-label="달러 가격과 60일·200일 이동평균선. 차트 아래 날짜에서 일별 수치를 조회할 수 있습니다."
           onPointerDown={e=>{if(e.button===0)gestureRef.current={x:e.clientX,y:e.clientY,horizontal:false};}}
           onPointerMove={e=>{const g=gestureRef.current;if(!g)return;const dx=Math.abs(e.clientX-g.x),dy=Math.abs(e.clientY-g.y);if(!g.horizontal&&dy>8&&dy>dx){gestureRef.current=null;return;}if(dx>8&&dx>dy){g.horizontal=true;e.currentTarget.setPointerCapture(e.pointerId);}if(g.horizontal)selectAt(e.clientX,e.currentTarget);}}
@@ -787,14 +789,14 @@
           {[['price','#3182f6'],['sma60','#b45309'],['sma200','#7e22ce']].map(([key,color])=>selected[key]!==null&&<circle key={key} cx={d.x(selected)} cy={d.y(selected[key])} r="3" fill={color}/>)}
         </svg>
           {[0,.5,1].map(f=>{const value=d.min+(d.max-d.min)*f;return <span key={f} className="absolute left-0 pr-1 text-right text-[10px] text-app-subtext pointer-events-none -translate-y-1/2" style={{top:`${d.y(value)/d.height*100}%`,width:`${d.left/d.width*100}%`}}>{value.toFixed(0)}</span>;})}
-          <div className="absolute bottom-1 flex justify-between text-[10px] text-app-subtext pointer-events-none" style={{left:`${d.left/d.width*100}%`,right:`${d.right/d.width*100}%`}}><span>{rows[0].date}</span><span>{last.date}</span></div>
+          <div className="absolute bottom-1 flex justify-between text-[10px] text-app-subtext pointer-events-none" style={{left:`${d.left/d.width*100}%`,right:`${d.right/d.width*100}%`}}><span>{rows[0].date}</span>{rows.length>1 && <span>{new Date((Date.parse(rows[0].date)+Date.parse(last.date))/2).toISOString().slice(0,7)}</span>}<span>{last.date}</span></div>
         </div>
         <div className="mt-3 rounded-xl bg-white p-3 text-xs" data-testid="momentum-info"><label className="flex flex-wrap items-center justify-between gap-2 font-semibold">날짜별 조회<input type="date" aria-label="모멘텀 조회 날짜" min={rows[0].date} max={last.date} value={selected.date} onChange={e=>selectDate(e.target.value)} onInput={e=>selectDate(e.currentTarget.value)} onBlur={e=>selectDate(e.currentTarget.value)} className="min-w-0 rounded-lg border border-gray-200 bg-white px-2 py-1"/></label><p className="mt-2 leading-relaxed">{selected.date}{snapshot&&selected.date===trend.date?' · 조회 시세 잠정':''}<br/>가격 {money(selected.price)} · 60일 {money(selected.sma60)} · 200일 {money(selected.sma200)}</p></div>
         <details className="mt-3 text-xs leading-relaxed text-app-subtext"><summary className="cursor-pointer">골든·데드크로스 해석</summary><p className="mt-2">60일선이 200일선을 아래에서 위로 넘어가면 골든크로스, 위에서 아래로 내려가면 데드크로스입니다. 두 선이 닿기만 하고 원래 위치로 돌아오면 새 교차로 세지 않습니다. 현재 위·아래에 있는 상태와 교차 발생일은 다릅니다. 60·200거래일의 평균으로 계산하며 차트 앞의 가격도 포함합니다. 두 선의 간격은 (60일 평균 ÷ 200일 평균 − 1)입니다. 교차는 추세 전환의 참고 신호로, 반응이 늦거나 횡보 중 반복될 수 있습니다. 기존 낙폭·공포 조건과 별도로 표시합니다.</p></details>
       </section>;
     }
 
-    function IndicatorPanel({ model, snapshot, source, confirmedMomentum }) {
+    function IndicatorPanel({ model, snapshot, source, confirmedMomentum, startDate, endDate }) {
       if (!model) return <p className="mt-4 text-xs text-app-subtext">보조지표를 계산할 가격 데이터가 없습니다.</p>;
       const fixed = n => n === null ? '데이터 부족' : n.toFixed(1);
       const signed = n => n === null ? '데이터 부족' : `${n >= 0 ? '+' : ''}${(n*100).toFixed(1)}%`;
@@ -810,7 +812,7 @@
         <div className="flex flex-wrap items-center justify-between gap-2 mb-2"><h3 className="text-sm font-bold">투자 판단 보조지표</h3><span className="text-xs text-app-subtext">가격 지표: USD 기준</span></div>
         <p className="mb-3 text-xs text-app-subtext">{source === 'SAMPLE' ? '샘플 데이터' : source === 'IMPORTED' ? '가져온 데이터' : snapshot ? '조회 시세로 잠정 계산' : '확정 종가 기준'} · 가격 기준일 {model.date}</p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">{cards.map(card=><div key={card.title} className="min-w-0 rounded-2xl border border-gray-100 bg-gray-50 p-4"><h4 className="text-xs font-semibold text-app-text">{card.title}</h4><p className="my-2 text-2xl font-bold text-app-text">{card.value}</p><p className="text-xs leading-relaxed text-app-text">{card.note}</p><p className="mt-2 text-[11px] leading-relaxed text-app-subtext">{card.detail}</p></div>)}</div>
-        <MomentumPanel trend={model.momentum} confirmed={confirmedMomentum} snapshot={snapshot} />
+        <MomentumPanel trend={model.momentum} confirmed={confirmedMomentum} snapshot={snapshot} startDate={startDate} endDate={endDate} />
         {fx && <p className="mt-3 text-[11px] leading-relaxed text-app-subtext">환율 기준일 {fx.date}{fx.live ? ` · 조회 환율${fx.readAt ? ' · 조회 시각 '+new Date(fx.readAt).toLocaleString('ko-KR',{timeZone:'Asia/Seoul'})+' KST' : ''}` : ' · 저장된 일별 환율'} · 주가와 환율의 관측 시점은 다를 수 있습니다.</p>}
         <details className="mt-3 text-xs text-app-subtext"><summary className="cursor-pointer">지표 계산과 해석</summary><p className="mt-2 leading-relaxed">RSI는 최근 상승·하락의 상대 강도입니다. 변동성은 20개 일별 로그수익률의 표본 표준편차를 연환산(252거래일)하며, 백분위가 높을수록 비교 기간보다 흔들림이 큽니다. 환율 위치는 최근 1년 저점과 고점 사이의 위치이며 백분위와 다릅니다. 계산에는 선택한 차트 시작일 이전의 데이터도 사용합니다. 조회 시세를 반영한 값은 종가 확정 전 달라질 수 있습니다. 보조지표는 기존 2개 매수 조건의 통과 수에 포함되지 않습니다.</p></details>
       </div>;
@@ -1973,7 +1975,7 @@
                   </Badge>
                 </div>
               </div>
-              <IndicatorPanel model={indicatorState.model} snapshot={indicatorState.snapshot} source={dataSource} confirmedMomentum={indicatorState.confirmedMomentum} />
+              <IndicatorPanel model={indicatorState.model} snapshot={indicatorState.snapshot} source={dataSource} confirmedMomentum={indicatorState.confirmedMomentum} startDate={settings.startDate} endDate={settings.endDate} />
             </Accordion>
 
             {/* ============ 3단계: 현재 시장은 어떤가요? ============ */}
