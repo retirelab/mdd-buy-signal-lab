@@ -86,7 +86,7 @@
   <script crossorigin src="https://unpkg.com/@babel/standalone@7.26.7/babel.min.js"></script>
 
   <script src="https://unpkg.com/lightweight-charts@5.1.0/dist/lightweight-charts.standalone.production.js"></script>
-  <script src="./chart-terminal.js?v=20261111.4"></script>
+  <script src="./chart-terminal.js?v=20261112.1"></script>
 
   <style>
     body {
@@ -111,6 +111,18 @@
     .terminal-status { display:flex; justify-content:space-between; flex-wrap:wrap; gap:6px; padding:0 12px 10px; color:#94a3b8; font:10px ui-monospace,SFMono-Regular,Menlo,monospace; }
     .terminal-canvas { position:relative; width:100%; min-width:0; }
     .terminal-hint { display:flex; justify-content:space-between; flex-wrap:wrap; gap:5px; padding:8px 12px; color:#94a3b8; font-size:10px; border-top:1px solid #edf0f4; }
+    .terminal-toolbar { flex-wrap:nowrap; padding:8px 10px; min-height:42px; }
+    .terminal-series-label { font:11px inherit; }
+    .terminal-settings { position:relative; flex-shrink:0; font-size:11px; color:#64748b; }
+    .terminal-settings summary { cursor:pointer; padding:7px; border-radius:6px; list-style:none; }
+    .terminal-settings summary:hover { background:#f1f5f9; }
+    .terminal-settings[open] .terminal-settings-body { display:flex; }
+    .terminal-settings-body { position:absolute; right:0; top:100%; z-index:20; width:min(280px,75vw); padding:12px; background:white; border:1px solid #e2e8f0; border-radius:10px; box-shadow:0 8px 24px #0f172a18; flex-direction:column; gap:12px; }
+    .terminal-inspector { height:76px; padding:8px 12px; border-top:1px solid #edf0f4; font-size:11px; }
+    .terminal-inspector-date { display:flex; align-items:center; justify-content:space-between; color:#64748b; font-variant-numeric:tabular-nums; }
+    .terminal-inspector-date button { border:0; padding:3px 6px; }
+    .terminal-inspector-values { display:flex; gap:12px; flex-wrap:wrap; margin-top:5px; font-variant-numeric:tabular-nums; }
+    .terminal-idle-hint { margin:18px 0; text-align:center; color:#94a3b8; font-size:11px; }
     @media(max-height:500px) { .chart-dialog .terminal-canvas { height:max(180px,calc(100dvh - 200px)) !important; } }
     @media(max-width:480px) { .terminal-button,.terminal-series-toggle { min-height:32px; } .terminal-toolbar{padding:10px 8px 8px;} .terminal-legend{gap:6px;} .terminal-series-label,.terminal-series-toggle{font-size:10px;} }
 
@@ -664,7 +676,7 @@
     // -------------------------------------
     // UI Components
     // -------------------------------------
-    const HISTORY_VERSION = '2026.11.11.4';
+    const HISTORY_VERSION = '2026.11.12.1';
 
     function HistoryMethodNote() {
       return <div className="rounded-xl bg-amber-50 p-4 text-xs leading-relaxed text-amber-800 space-y-2">
@@ -860,6 +872,7 @@
       return <section data-testid="momentum-panel" className="mt-4 rounded-2xl border border-gray-100 bg-gray-50 p-4">
         <div className="flex flex-wrap justify-between items-center gap-2"><h4 className="text-sm font-bold">추세추종 모멘텀 · 60일 / 200일</h4><span className="text-[11px] text-app-subtext">USD · 단순이동평균</span></div>
         <p className={`mt-3 text-lg font-bold ${trend.position==='above'?'text-app-blue':trend.position==='below'?'text-app-pink':'text-app-text'}`}>{status}</p>
+        <details className="mt-2 text-xs"><summary className="cursor-pointer text-app-subtext">추세 수치·최근 교차</summary>
         <p className="mt-1 text-xs text-app-subtext">{snapshot?'조회 시세 기준 · 잠정':'종가 기록 기준'} · {trend.date}{trend.gap!==null ? ` · 두 선의 간격 ${gapText}` : ''}</p>
         <div className="mt-3 grid grid-cols-2 gap-2 text-xs"><div className="rounded-xl bg-white p-3"><span className="text-red-500 font-semibold">60일 평균</span><p className="mt-1 font-bold">{money(trend.sma60)}</p></div><div className="rounded-xl bg-white p-3"><span className="text-purple-700 font-semibold">200일 평균</span><p className="mt-1 font-bold">{money(trend.sma200)}</p></div></div>
         <div className="mt-3 rounded-xl bg-white p-3 text-xs leading-relaxed" data-testid="momentum-cross">
@@ -869,9 +882,10 @@
           {tentative && <p className="mt-2 font-semibold text-amber-700">조회 시세에서 {name(tentative.type)} 감지 · {tentative.date} · 잠정, 종가 확인 필요</p>}
           {snapshot && event?.date===trend.date && (trend.lastCross?.date!==event.date || trend.lastCross?.type!==event.type) && <p className="mt-2 text-amber-700">조회 시세 판정이 저장된 종가 교차와 다릅니다. 종가 기록을 함께 확인하세요.</p>}
         </div>
+        </details>
         <ChartViewer title="60일·200일 이동평균 차트">{expanded=><div>
         <div className="hidden mt-4 flex flex-wrap gap-x-4 gap-y-1 text-[11px] font-semibold"><span className="text-app-blue">━ 가격</span><span className="text-amber-700">━ 60일선</span><span className="text-purple-700">┄ 200일선</span><span className="text-app-subtext">선택 기간 · {rows.length.toLocaleString()}거래일</span></div>
-        <p className="mt-2 text-[11px] text-app-subtext" data-testid="momentum-range">선택 기간 {rows[0].date} ~ {last.date}</p>
+        <p className="hidden" data-testid="momentum-range">선택 기간 {rows[0].date} ~ {last.date}</p>
         <TerminalPlot series={terminalSeries} markers={terminalMarkers} selectedDate={selected.date} onSelectDate={setSelectedDate} kind="usd" expanded={expanded} testId="terminal-momentum" label="이동평균 금융 차트" height={expanded?'max(320px, calc(100dvh - 300px))':undefined} fallback={<div className="relative mt-2 h-48 sm:h-64 w-full rounded-lg bg-white" style={expanded?{height:"max(260px, calc(100dvh - 260px))"}:undefined}><svg data-testid="momentum-chart" viewBox={`0 0 ${d.width} ${d.height}`} className="h-full w-full" preserveAspectRatio="none" style={{touchAction:'pan-y'}} role="img" aria-label="달러 가격과 60일·200일 이동평균선. 차트 아래 날짜에서 일별 수치를 조회할 수 있습니다."
           onPointerDown={e=>{if(e.button===0)gestureRef.current={x:e.clientX,y:e.clientY,horizontal:false};}}
           onPointerMove={e=>{const g=gestureRef.current;if(!g)return;const dx=Math.abs(e.clientX-g.x),dy=Math.abs(e.clientY-g.y);if(!g.horizontal&&dy>8&&dy>dx){gestureRef.current=null;return;}if(dx>8&&dx>dy){g.horizontal=true;e.currentTarget.setPointerCapture(e.pointerId);}if(g.horizontal)selectAt(e.clientX,e.currentTarget);}}
@@ -887,7 +901,7 @@
           {[0,.5,1].map(f=>{const value=d.min+(d.max-d.min)*f;return <span key={f} className="absolute left-0 pr-1 text-right text-[10px] text-app-subtext pointer-events-none -translate-y-1/2" style={{top:`${d.y(value)/d.height*100}%`,width:`${d.left/d.width*100}%`}}>{value.toFixed(0)}</span>;})}
           <div className="absolute bottom-1 flex justify-between text-[10px] text-app-subtext pointer-events-none" style={{left:`${d.left/d.width*100}%`,right:`${d.right/d.width*100}%`}}><span>{rows[0].date}</span>{rows.length>1 && <span>{new Date((Date.parse(rows[0].date)+Date.parse(last.date))/2).toISOString().slice(0,7)}</span>}<span>{last.date}</span></div>
         </div>} />
-        <div className="mt-3 rounded-xl bg-white p-3 text-xs" data-testid="momentum-info"><label className="flex flex-wrap items-center justify-between gap-2 font-semibold">날짜별 조회<input type="date" aria-label="모멘텀 조회 날짜" min={rows[0].date} max={last.date} value={selected.date} onChange={e=>selectDate(e.target.value)} onInput={e=>selectDate(e.currentTarget.value)} onBlur={e=>selectDate(e.currentTarget.value)} className="min-w-0 rounded-lg border border-gray-200 bg-white px-2 py-1"/></label><p className="mt-2 leading-relaxed">{selected.date}{snapshot&&selected.date===trend.date?' · 조회 시세 잠정':''}<br/>가격 {money(selected.price)} · 60일 {money(selected.sma60)} · 200일 {money(selected.sma200)}</p></div>
+        <details className="mt-3 rounded-xl bg-white p-3 text-xs" data-testid="momentum-info"><summary className="cursor-pointer text-app-subtext">날짜 직접 조회·상세값</summary><label className="flex flex-wrap items-center justify-between gap-2 font-semibold">날짜별 조회<input type="date" aria-label="모멘텀 조회 날짜" min={rows[0].date} max={last.date} value={selected.date} onChange={e=>selectDate(e.target.value)} onInput={e=>selectDate(e.currentTarget.value)} onBlur={e=>selectDate(e.currentTarget.value)} className="min-w-0 rounded-lg border border-gray-200 bg-white px-2 py-1"/></label><p className="mt-2 leading-relaxed">{selected.date}{snapshot&&selected.date===trend.date?' · 조회 시세 잠정':''}<br/>가격 {money(selected.price)} · 60일 {money(selected.sma60)} · 200일 {money(selected.sma200)}</p></details>
         </div>}</ChartViewer>
         <details className="mt-3 text-xs leading-relaxed text-app-subtext"><summary className="cursor-pointer">골든·데드크로스 해석</summary><p className="mt-2">60일선이 200일선을 아래에서 위로 넘어가면 골든크로스, 위에서 아래로 내려가면 데드크로스입니다. 두 선이 닿기만 하고 원래 위치로 돌아오면 새 교차로 세지 않습니다. 현재 위·아래에 있는 상태와 교차 발생일은 다릅니다. 60·200거래일의 평균으로 계산하며 차트 앞의 가격도 포함합니다. 두 선의 간격은 (60일 평균 ÷ 200일 평균 − 1)입니다. 교차는 추세 전환의 참고 신호로, 반응이 늦거나 횡보 중 반복될 수 있습니다. 기존 낙폭·공포 조건과 별도로 표시합니다.</p></details>
       </section>;
@@ -1457,7 +1471,7 @@
         if(index!==null)onSelectDate(model.rows[index].date);
       }
       return <ChartViewer title={chartTitle}>{expanded=><div>
-        {expanded && <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-xs"><span>{model.rows[0].date} ~ {model.rows[model.rows.length-1].date} · {showUsd?'USD ':''}{showKrw?'KRW':''}</span><label>날짜 조회 <input type="date" aria-label={`${chartTitle} 확대 날짜`} min={model.rows[0].date} max={model.rows[model.rows.length-1].date} value={sel?.date||model.rows[model.rows.length-1].date} onChange={e=>selectDate(e.target.value)} onInput={e=>selectDate(e.currentTarget.value)} onBlur={e=>selectDate(e.currentTarget.value)} className="rounded-lg border border-gray-200 px-2 py-1"/></label></div>}
+        {expanded && <details className="mb-3 text-xs"><summary className="cursor-pointer text-app-subtext">날짜 직접 조회</summary><div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-xs"><span>{model.rows[0].date} ~ {model.rows[model.rows.length-1].date} · {showUsd?'USD ':''}{showKrw?'KRW':''}</span><label>날짜 조회 <input type="date" aria-label={`${chartTitle} 확대 날짜`} min={model.rows[0].date} max={model.rows[model.rows.length-1].date} value={sel?.date||model.rows[model.rows.length-1].date} onChange={e=>selectDate(e.target.value)} onInput={e=>selectDate(e.currentTarget.value)} onBlur={e=>selectDate(e.currentTarget.value)} className="rounded-lg border border-gray-200 px-2 py-1"/></label></div></details>}
         <TerminalPlot series={terminalSeries} markers={terminalMarkers} references={terminalReferences} selectedDate={selectedDate} onSelectDate={onSelectDate} kind={isDD?'percent':'number'} expanded={expanded} testId={`terminal-${mode}`} label={isDD?'낙폭 금융 차트':'가격 지수 금융 차트'} height={expanded?(isDD?'max(300px, calc(100dvh - 440px))':'max(320px, calc(100dvh - 340px))'):undefined} fallback={<div ref={wrapRef} className="h-56 w-full relative rounded-xl cursor-crosshair"
           data-testid={`chart-${mode}`} role="group" aria-label={isDD ? '일별 낙폭 차트' : '일별 가격 지수 차트'}
           style={{ touchAction: 'pan-y',...(expanded?{height:isDD?'max(260px, calc(100dvh - 390px))':'max(260px, calc(100dvh - 280px))'}:{}) }}
@@ -1511,21 +1525,21 @@
         {isDD && onDdPctChange && (() => {
           const snappedDisplay = Math.round(sliderDraft / 5) * 5;
           const commit = () => { if (snappedDisplay !== currentDdPct) onDdPctChange(snappedDisplay); else setSliderDraft(snappedDisplay); };
-          return <div className="mt-3 bg-app-bg rounded-2xl px-4 py-4 border border-app-border">
+          return <details className="mt-3 bg-app-bg rounded-2xl px-4 py-3 border border-app-border"><summary className="text-xs text-app-subtext cursor-pointer">추가매수 기준선 조정 · {snappedDisplay}%</summary><div className="pt-3">
             <div className="flex items-center justify-between mb-3"><span className="text-xs font-bold text-app-subtext">추가매수 기준선 (최고점 대비)</span><span className="text-base font-extrabold text-app-pink">{snappedDisplay}%</span></div>
             <input aria-label="추가매수 기준 낙폭" type="range" min="-100" max="-5" step="1" value={sliderDraft} onChange={e => setSliderDraft(Number(e.target.value))} onPointerDown={e => e.currentTarget.setPointerCapture(e.pointerId)} onPointerUp={commit} onPointerCancel={() => setSliderDraft(currentDdPct)} onBlur={commit} onKeyUp={commit} className="w-full" />
             <div className="flex justify-between text-[10px] text-app-subtext mt-2"><span>-100%</span><span>-5%</span></div>
-          </div>;
+          </div></details>;
         })()}
-        <div className="mt-3 min-h-[110px] bg-white border border-gray-200 rounded-xl p-3 text-sm" data-testid={`chart-info-${mode}`}>
+        <details className="mt-3 bg-white border border-gray-200 rounded-xl p-3 text-sm" data-testid={`chart-info-${mode}`}><summary className="text-xs text-app-subtext cursor-pointer">선택일 원본 가격·상세값</summary><div className="pt-3">
           {sel ? <>
           <p className="font-bold text-app-text mb-2">{sel.date} · {sel.snapshot ? '조회 시세 반영 · 저장 안 함' : '원본 일별 데이터'}</p>
           <div className="grid grid-cols-2 gap-2">
             {showUsd && <div className="bg-blue-50 rounded-lg p-2"><span className="text-xs text-app-blue font-bold">USD · {sel.usdSnapshot ? '조회' : '종가'}</span><p className="font-bold">{isDD ? formatPct(sel.usdDd) : sel.usdPrice === null ? '데이터 없음' : '$' + formatNum(sel.usdPrice)}</p></div>}
             {showKrw && <div className="bg-green-50 rounded-lg p-2"><span className="text-xs text-app-green font-bold">KRW · {sel.krwSnapshot ? '조회 환산' : '종가'}</span><p className="font-bold">{isDD ? formatPct(sel.krwDd) : sel.krwPrice === null ? '데이터 없음' : formatKrw(sel.krwPrice)}</p></div>}
           </div>
-        </> : <p className="text-sm text-app-subtext">차트를 누르거나 날짜를 입력하면 원본 정보를 표시합니다.</p>}</div>
-        <p className="mt-2 text-xs text-app-subtext">터치·클릭하면 두 차트가 같은 거래일을 표시합니다.</p>
+        </> : <p className="text-sm text-app-subtext">차트를 누르거나 날짜를 입력하면 원본 정보를 표시합니다.</p>}</div></details>
+        
       </div>}</ChartViewer>;
     }
 
@@ -2140,7 +2154,7 @@
                   </button>
                 </div>
 
-                {chartModel.rows.length > 0 && <div className="rounded-xl bg-app-bg p-3 space-y-2">
+                {chartModel.rows.length > 0 && <details className="rounded-xl bg-app-bg p-3 space-y-2"><summary className="cursor-pointer text-xs text-app-subtext">날짜 직접 조회</summary>
                   <div className="flex flex-wrap items-center gap-3">
                     <label className="text-xs font-bold text-app-text" htmlFor="chart-date">날짜 직접 조회</label>
                     <input id="chart-date" aria-label="차트 조회 날짜" type="date"
@@ -2150,12 +2164,12 @@
                       className="max-w-full rounded-lg border border-gray-200 bg-white px-2 py-1 text-sm" />
                   </div>
                   <p className="text-[11px] text-app-subtext">모든 거래일을 조회할 수 있습니다. 휴장일은 가장 가까운 거래일로 표시합니다. 실제 거래일 자료를 기준으로 표시합니다.</p>
-                </div>}
+                </details>}
 
                 {/* 두 차트는 같은 원본 날짜와 가로축 좌표를 공유합니다. */}
                 <div className="grid grid-cols-1 gap-4">
                   {/* 낙폭 차트 */}
-                  <div className="p-4 rounded-xl border border-gray-100 bg-gray-50">
+                  <div className="p-2 sm:p-4 rounded-xl border border-gray-100 bg-gray-50">
                     <h4 className="font-bold text-app-text mb-3 text-sm">📉 최고점 대비 하락률</h4>
                     <OverlayChart
                       model={episodeView.model}
@@ -2173,7 +2187,7 @@
                   </div>
 
                   {/* 주가 차트 (정규화) */}
-                  <div className="p-4 rounded-xl border border-gray-100 bg-gray-50">
+                  <div className="p-2 sm:p-4 rounded-xl border border-gray-100 bg-gray-50">
                     <h4 className="font-bold text-app-text mb-3 text-sm">📈 가격 흐름 (시작 = 100 기준)</h4>
                     <OverlayChart
                       model={episodeView.model}
@@ -2189,7 +2203,7 @@
                 </div>
 
                 {/* 핵심 수치 요약 */}
-                <div className="grid grid-cols-2 gap-2">
+                <details><summary className="cursor-pointer text-xs text-app-subtext mb-2">현재 가격·목표 가격 비교</summary><div className="grid grid-cols-2 gap-2">
                   {chartUsd && displayState.usdEngine && (
                     <div className="bg-app-blueLight p-3 rounded-xl border border-app-blue/20">
                       <p className="text-xs text-app-blue font-bold mb-2">USD 기준</p>
@@ -2212,7 +2226,7 @@
                       </div>
                     </div>
                   )}
-                </div>
+                </div></details>
               </div>
             </Accordion>
 

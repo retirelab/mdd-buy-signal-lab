@@ -16,3 +16,10 @@ v2026.11.11.4부터 TradingView Lightweight Charts 5.1.0의 선차트를 사용�
 Apache 2.0 라이선스와 NOTICE는 docs/third-party에 보관합니다. 차트의 TradingView 로고 / 링크와 앱 하단의 저작권 표시를 유지합니다.
 
 검증: `node --test tests/*.test.cjs`, 브라우저에서 세 차트·기간 변경·로그 축·MA 토글·확대와 복원·날짜 및 십자선 연동·모바일 폭·대체 차트 확인.
+
+## v2026.11.12.1: inspect on demand
+- Default view contains series names and axes, without latest-value labels, horizontal crosshair values, or event markers.
+- Hover/click/touch reveals a single fixed-height inspector below the plot; Close clears inspection. Opening a chart does not select the latest point. External date changes still synchronize the inspected day.
+- Zoom, scale mode, optional MA lines and event markers are in Chart settings.
+- Direct date lookup, source values, trend numbers and target adjustment use collapsed disclosures. Mobile plots have smaller outer padding and compact percentage axes.
+- Browser QA: desktop and 390px viewport, popup opening, click inspection/clearing, direct date selection and MA visibility toggles. Node regression suite: 59 pass.

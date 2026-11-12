@@ -30,11 +30,12 @@
   function Plot(props){
     const React=root.React,h=React.createElement;
     const {useState,useRef,useEffect}=React;
-    const host=useRef(null),engine=useRef(null),latest=useRef(props),syncing=useRef(false);
+    const host=useRef(null),engine=useRef(null),latest=useRef(props),syncing=useRef(false),previousDate=useRef(props.selectedDate),pinned=useRef(false);
     latest.current=props;
-    const [failed,setFailed]=useState(false),[hover,setHover]=useState(null),[hidden,setHidden]=useState({}),[log,setLog]=useState(false),[visibleRange,setVisibleRange]=useState(null);
+    const [failed,setFailed]=useState(false),[hover,setHover]=useState(null),[hidden,setHidden]=useState({}),[log,setLog]=useState(false),[visibleRange,setVisibleRange]=useState(null),[inspecting,setInspecting]=useState(false),[showMarkers,setShowMarkers]=useState(false);
     const series=props.series||EMPTY,markers=props.markers||EMPTY,references=props.references||EMPTY;
     const kind=props.kind||'number';
+    const axisValue=value=>kind==='percent'?(value*100).toFixed(0)+'%':formatValue(value,kind);
     useEffect(()=>{
       const L=root.LightweightCharts;
       if(failed||!L||!host.current)return;
@@ -44,24 +45,26 @@
           autoSize:true,
           layout:{background:{type:'solid',color:'#fafbfc'},textColor:'#64748b',fontSize:11,fontFamily:'ui-monospace, SFMono-Regular, Menlo, monospace',attributionLogo:true},
           grid:{vertLines:{color:'#e5e9ef'},horzLines:{color:'#e5e9ef'}},
-          rightPriceScale:{borderColor:'#dce2ea',scaleMargins:{top:kind==='percent'?0:.12,bottom:.1},minimumWidth:72},
+          rightPriceScale:{borderColor:'#dce2ea',scaleMargins:{top:kind==='percent'?0:.12,bottom:.1},minimumWidth:52},
           leftPriceScale:{visible:false},
           timeScale:{borderColor:'#dce2ea',timeVisible:false,rightOffset:4,fixLeftEdge:true,fixRightEdge:true,minBarSpacing:.01},
-          crosshair:{mode:L.CrosshairMode.Normal,vertLine:{color:'#64748b',width:1,style:2,labelBackgroundColor:'#334155'},horzLine:{color:'#64748b',width:1,style:2,labelBackgroundColor:'#334155'}},
+          crosshair:{mode:L.CrosshairMode.Normal,vertLine:{color:'#64748b',width:1,style:2,labelBackgroundColor:'#334155'},horzLine:{visible:false,labelVisible:false}},
           handleScroll:{mouseWheel:false,pressedMouseMove:true,horzTouchDrag:true,vertTouchDrag:false},
           handleScale:{mouseWheel:!!props.expanded,pinch:true,axisPressedMouseMove:true,axisDoubleClickReset:true},
-          localization:{locale:'ko-KR',priceFormatter:value=>formatValue(value,kind)}
+          localization:{locale:'ko-KR',priceFormatter:axisValue}
         });
         const state={chart,items:new Map(),references:[],firstFit:false};
         engine.current=state;
         const move=param=>{
           if(syncing.current)return;
           const date=isoDay(param.time);
-          if(!date){setHover(null);return;}
+          if(!date){if(!pinned.current){setHover(null);setInspecting(false);}return;}
+          setInspecting(true);
           setHover(prev=>prev===date?prev:date);
           latest.current.onSelectDate?.(date);
         };
-        chart.subscribeCrosshairMove(move);chart.subscribeClick(move);
+        const click=param=>{pinned.current=true;move(param);};
+        chart.subscribeCrosshairMove(move);chart.subscribeClick(click);
         const rangeChanged=range=>{
           const from=isoDay(range?.from),to=isoDay(range?.to);
           if(from&&to)setVisibleRange(prev=>prev?.from===from&&prev?.to===to?prev:{from,to});
@@ -72,7 +75,7 @@
           if(rect?.width>100&&rect.height>100&&!state.firstFit&&state.items.size){chart.timeScale().fitContent();state.firstFit=true;}
         });
         observer.observe(host.current);
-        return ()=>{observer.disconnect();chart.timeScale().unsubscribeVisibleTimeRangeChange(rangeChanged);chart.unsubscribeCrosshairMove(move);chart.unsubscribeClick(move);engine.current=null;chart.remove();};
+        return ()=>{observer.disconnect();chart.timeScale().unsubscribeVisibleTimeRangeChange(rangeChanged);chart.unsubscribeCrosshairMove(move);chart.unsubscribeClick(click);engine.current=null;chart.remove();};
       }catch(error){if(chart)chart.remove();engine.current=null;setFailed(true);}
     },[kind,failed]);
     useEffect(()=>{
@@ -82,7 +85,7 @@
       try{
         for(const def of series){
           let item=state.items.get(def.id);
-          if(!item){item={api:state.chart.addSeries(L.LineSeries,{color:def.color,lineWidth:def.width||1,lastValueVisible:true,priceLineVisible:true,priceLineStyle:2,priceLineWidth:1,crosshairMarkerRadius:3,lineStyle:def.dashed?2:0,priceFormat:{type:'custom',minMove:kind==='percent' ? .0001 : .01,formatter:value=>formatValue(value,kind)}}),markers:null};state.items.set(def.id,item);}
+          if(!item){item={api:state.chart.addSeries(L.LineSeries,{color:def.color,lineWidth:def.width||1,lastValueVisible:false,priceLineVisible:false,priceLineStyle:2,priceLineWidth:1,crosshairMarkerRadius:3,lineStyle:def.dashed?2:0,priceFormat:{type:'custom',minMove:kind==='percent' ? .0001 : .01,formatter:axisValue}}),markers:null};state.items.set(def.id,item);}
           item.api.setData(def.data);
         }
         state.chart.timeScale().fitContent();state.firstFit=!!host.current?.getBoundingClientRect().width;
@@ -91,8 +94,8 @@
     },[series,kind]);
     useEffect(()=>{
       const state=engine.current,L=root.LightweightCharts;if(!state)return;
-      for(const def of series){const item=state.items.get(def.id);if(!item)continue;const points=markersForSeries(def,markers);if(item.markers)item.markers.setMarkers(points);else if(points.length)item.markers=L.createSeriesMarkers(item.api,points);}
-    },[series,markers,kind]);
+      for(const def of series){const item=state.items.get(def.id);if(!item)continue;const points=showMarkers?markersForSeries(def,markers):[];if(item.markers)item.markers.setMarkers(points);else if(points.length)item.markers=L.createSeriesMarkers(item.api,points);}
+    },[series,markers,kind,showMarkers]);
     useEffect(()=>{
       const state=engine.current;if(!state)return;
       for(const def of series)state.items.get(def.id)?.api.applyOptions({visible:!hidden[def.id]});
@@ -104,11 +107,13 @@
       for(const item of state.items.values())item.referenceLines=[];
       const first=series.find(s=>!hidden[s.id]),item=first&&state.items.get(first.id);
       if(kind==='percent')for(const target of state.items.values())target.api.applyOptions({autoscaleInfoProvider:original=>includeReferenceRange(original(),references)});
-      if(item) for(const line of references)if(Number.isFinite(line.value))item.referenceLines.push(item.api.createPriceLine({price:line.value,color:line.color||'#94a3b8',lineWidth:1,lineStyle:2,axisLabelVisible:true,title:line.title||''}));
+      if(item) for(const line of references)if(Number.isFinite(line.value))item.referenceLines.push(item.api.createPriceLine({price:line.value,color:line.color||'#94a3b8',lineWidth:1,lineStyle:2,axisLabelVisible:false,title:''}));
     },[references,series,hidden,kind]);
     useEffect(()=>{
-      const state=engine.current,date=props.selectedDate;if(!state||!date)return;
-      setHover(null);
+      const state=engine.current,date=props.selectedDate;
+      if(previousDate.current===date)return;previousDate.current=date;
+      if(!state||!date)return;
+      setInspecting(true);setHover(date);
       const def=series.find(s=>!hidden[s.id]&&s.data.some(r=>r.time===date&&Number.isFinite(r.value)));
       if(!def)return;
       const point=def.data.find(r=>r.time===date),item=state.items.get(def.id);if(!item)return;
@@ -129,23 +134,29 @@
       return ()=>{cancelled=true;cancelAnimationFrame(frame);};
     },[props.selectedDate,series,hidden,kind]);
     if(!root.LightweightCharts||failed)return h('div',null,h('p',{className:'mb-2 text-xs text-app-subtext'},'기본 차트로 표시 중입니다.'),props.fallback);
-    const date=hover||props.selectedDate||series[0]?.data.at(-1)?.time;
+    const date=hover||props.selectedDate;
     function zoom(factor){const ts=engine.current?.chart.timeScale(),r=ts?.getVisibleLogicalRange();if(!r)return;const mid=(r.from+r.to)/2,half=(r.to-r.from)*factor/2;ts.setVisibleLogicalRange({from:mid-half,to:mid+half});}
+    function clear(){pinned.current=false;setInspecting(false);setHover(null);engine.current?.chart.clearCrosshairPosition();}
     const button=(label,action,active=false,extra={})=>h('button',{type:'button',onClick:action,className:`terminal-button${active?' active':''}`,...extra},label);
     return h('div',{className:'terminal-shell','data-testid':props.testId||'terminal-plot'},
       h('div',{className:'terminal-toolbar'},
-        h('div',{className:'terminal-legend'},series.map(def=>{
-          const point=def.data.find(r=>r.time===date);
-          const content=h(React.Fragment,null,h('span',{className:'terminal-dot',style:{background:def.color,opacity:hidden[def.id] ? .3 : 1}}),def.label,h('strong',null,hidden[def.id]?'OFF':formatValue(point?.value,kind)));
-          return def.toggleable?h('button',{type:'button',key:def.id,'aria-label':def.label+' 표시','aria-pressed':!hidden[def.id],onClick:()=>setHidden(prev=>({...prev,[def.id]:!prev[def.id]})),className:'terminal-series-toggle'+(hidden[def.id]?' muted':''),style:{color:def.color}},content):h('span',{key:def.id,className:'terminal-series-label',style:{color:def.color}},content);
-        })),
-        h('div',{className:'terminal-controls'},kind!=='percent'&&h(React.Fragment,null,button('선형',()=>setLog(false),!log,{'aria-pressed':!log}),button('로그',()=>setLog(true),log,{'aria-pressed':log})),button('−',()=>zoom(1.4),false,{'aria-label':'차트 축소',disabled:!visibleRange}),button('+',()=>zoom(.7),false,{'aria-label':'차트 확대',disabled:!visibleRange}),button('전체 구간',()=>engine.current?.chart.timeScale().fitContent()))
+        h('div',{className:'terminal-legend'},series.map(def=>h('span',{key:def.id,className:'terminal-series-label',style:{color:def.color,opacity:hidden[def.id] ? .35 : 1}},h('span',{className:'terminal-dot',style:{background:def.color}}),def.label))),
+        h('details',{className:'terminal-settings'},h('summary',null,'차트 설정'),
+          h('div',{className:'terminal-settings-body'},
+            h('div',{className:'terminal-controls'},kind!=='percent'&&h(React.Fragment,null,button('선형',()=>setLog(false),!log,{'aria-pressed':!log}),button('로그',()=>setLog(true),log,{'aria-pressed':log})),button('−',()=>zoom(1.4),false,{'aria-label':'차트 축소',disabled:!visibleRange}),button('+',()=>zoom(.7),false,{'aria-label':'차트 확대',disabled:!visibleRange}),button('전체 구간',()=>engine.current?.chart.timeScale().fitContent())),
+            h('div',{className:'terminal-controls'},series.filter(s=>s.toggleable).map(def=>button(def.label,()=>setHidden(prev=>({...prev,[def.id]:!prev[def.id]})),!hidden[def.id],{key:def.id,'aria-label':def.label+' 표시','aria-pressed':!hidden[def.id]})),markers.length>0&&button('교차·시점 표시',()=>setShowMarkers(v=>!v),showMarkers,{'aria-pressed':showMarkers})),
+            h('p',{'data-testid':'terminal-visible-range'},visibleRange?`${visibleRange.from} ~ ${visibleRange.to}`:'전체 구간')
+          )
+        )
       ),
-      h('div',{className:'terminal-status'},h('span',null,date||'날짜 선택'),h('span',null,kind==='percent'?'전고점 대비 낙폭':kind==='usd'?'USD · 가격 선차트':'시작 = 100 · 가격 지수')),
-      h('div',{ref:host,className:'terminal-canvas',style:{height:props.height||'clamp(260px,34vw,340px)'},role:'group','aria-label':props.label||'금융 차트'}),
-      h('div',{className:'terminal-hint'},h('span',null,props.expanded?'드래그로 이동 · 휠/두 손가락으로 확대':'가로 드래그로 이동 · 두 손가락으로 확대'),h('span',{'data-testid':'terminal-visible-range'},visibleRange?`화면 ${visibleRange.from} ~ ${visibleRange.to}`:'마우스·터치로 날짜 조회'))
+      h('div',{ref:host,className:'terminal-canvas',style:{height:props.height||'clamp(260px,34vw,340px)'},role:'group',tabIndex:0,onKeyDown:e=>{if(e.key==='Escape')clear();},'aria-label':props.label||'금융 차트'}),
+      h('div',{className:'terminal-inspector','data-testid':'terminal-inspector'},inspecting&&date?h(React.Fragment,null,
+        h('div',{className:'terminal-inspector-date'},h('span',null,date),button('닫기',clear,false,{'aria-label':'선택값 닫기'})),
+        h('div',{className:'terminal-inspector-values'},series.filter(def=>!hidden[def.id]).map(def=>h('span',{key:def.id,style:{color:def.color}},def.label+' ',h('strong',null,formatValue(def.data.find(r=>r.time===date)?.value,kind)))))
+      ):h('p',{className:'terminal-idle-hint'},'터치·클릭으로 값 확인 · 가로 드래그로 이동'))
     );
   }
+
   const api={prepareSeries,markersForSeries,isoDay,formatValue,includeReferenceRange,Plot};
   if(typeof module!=='undefined'&&module.exports)module.exports=api;
   else root.ChartTerminal=api;
