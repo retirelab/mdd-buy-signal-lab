@@ -86,7 +86,7 @@
   <script crossorigin src="https://unpkg.com/@babel/standalone@7.26.7/babel.min.js"></script>
 
   <script src="https://unpkg.com/lightweight-charts@5.1.0/dist/lightweight-charts.standalone.production.js"></script>
-  <script src="./chart-terminal.js?v=20261112.2"></script>
+  <script src="./chart-terminal.js?v=20261112.3"></script>
 
   <style>
     body {
@@ -119,6 +119,11 @@
     .terminal-settings[open] .terminal-settings-body { display:flex; }
     .terminal-settings-body { position:absolute; right:0; top:100%; z-index:20; width:min(280px,75vw); padding:12px; background:white; border:1px solid #e2e8f0; border-radius:10px; box-shadow:0 8px 24px #0f172a18; flex-direction:column; gap:12px; }
     .terminal-inspector { height:76px; padding:8px 12px; border-top:1px solid #edf0f4; font-size:11px; }
+    .terminal-inspector.with-prices { height:118px; }
+    .terminal-price-inspection { width:100%; margin-top:4px; font-variant-numeric:tabular-nums; font-size:11px; }
+    .terminal-price-inspection th { color:#94a3b8; font-weight:400; text-align:right; padding-bottom:2px; }
+    .terminal-price-inspection td { padding:3px 0; text-align:right; white-space:nowrap; }
+    .terminal-price-inspection th:first-child,.terminal-price-inspection td:first-child { text-align:left; }
     .terminal-inspector-date { display:flex; align-items:center; justify-content:space-between; color:#64748b; font-variant-numeric:tabular-nums; }
     .terminal-inspector-date button { border:0; padding:3px 6px; }
     .terminal-inspector-values { display:flex; gap:12px; flex-wrap:wrap; margin-top:5px; font-variant-numeric:tabular-nums; }
@@ -676,7 +681,7 @@
     // -------------------------------------
     // UI Components
     // -------------------------------------
-    const HISTORY_VERSION = '2026.11.12.2';
+    const HISTORY_VERSION = '2026.11.12.3';
 
     function HistoryMethodNote() {
       return <div className="rounded-xl bg-amber-50 p-4 text-xs leading-relaxed text-amber-800 space-y-2">
@@ -1493,7 +1498,14 @@
       }
       return <ChartViewer title={chartTitle}>{expanded=><div>
         {expanded && <details className="mb-3 text-xs"><summary className="cursor-pointer text-app-subtext">날짜 직접 조회</summary><div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-xs"><span>{model.rows[0].date} ~ {model.rows[model.rows.length-1].date} · {showUsd?'USD ':''}{showKrw?'KRW':''}</span><label>날짜 조회 <input type="date" aria-label={`${chartTitle} 확대 날짜`} min={model.rows[0].date} max={model.rows[model.rows.length-1].date} value={sel?.date||model.rows[model.rows.length-1].date} onChange={e=>selectDate(e.target.value)} onInput={e=>selectDate(e.currentTarget.value)} onBlur={e=>selectDate(e.currentTarget.value)} className="rounded-lg border border-gray-200 px-2 py-1"/></label></div></details>}
-        <TerminalPlot series={terminalSeries} markers={terminalMarkers} references={terminalReferences} selectedDate={selectedDate} onSelectDate={onSelectDate} kind={isDD?'percent':'number'} expanded={expanded} testId={`terminal-${mode}`} label={isDD?'낙폭 금융 차트':'가격 지수 금융 차트'} height={expanded?(isDD?'max(300px, calc(100dvh - 440px))':'max(320px, calc(100dvh - 340px))'):undefined} fallback={<div ref={wrapRef} className="h-56 w-full relative rounded-xl cursor-crosshair"
+        <TerminalPlot renderInspection={date=>{
+          const row=model.rows.find(r=>r.date===date);
+          if(!row)return <p className="text-app-subtext">해당 날짜의 가격 데이터가 없습니다.</p>;
+          return <table className="terminal-price-inspection" aria-label="선택일 가격과 차트값"><thead><tr><th scope="col">통화</th><th scope="col">실제 가격</th><th scope="col">{isDD?'낙폭':'가격 지수'}</th></tr></thead><tbody>
+            {showUsd&&<tr className="text-app-blue"><td>USD{row.usdSnapshot?' · 조회':''}</td><td><strong>{Number.isFinite(row.usdPrice)?'$'+formatNum(row.usdPrice):'데이터 없음'}</strong></td><td>{isDD?formatPct(row.usdDd):formatNum(row.usdIndex)}</td></tr>}
+            {showKrw&&<tr className="text-app-green"><td>KRW{row.krwSnapshot?' · 조회':''}</td><td><strong>{Number.isFinite(row.krwPrice)?formatKrw(row.krwPrice):'데이터 없음'}</strong></td><td>{isDD?formatPct(row.krwDd):formatNum(row.krwIndex)}</td></tr>}
+          </tbody></table>;
+        }} series={terminalSeries} markers={terminalMarkers} references={terminalReferences} selectedDate={selectedDate} onSelectDate={onSelectDate} kind={isDD?'percent':'number'} expanded={expanded} testId={`terminal-${mode}`} label={isDD?'낙폭 금융 차트':'가격 지수 금융 차트'} height={expanded?(isDD?'max(300px, calc(100dvh - 440px))':'max(320px, calc(100dvh - 340px))'):undefined} fallback={<div ref={wrapRef} className="h-56 w-full relative rounded-xl cursor-crosshair"
           data-testid={`chart-${mode}`} role="group" aria-label={isDD ? '일별 낙폭 차트' : '일별 가격 지수 차트'}
           style={{ touchAction: 'pan-y',...(expanded?{height:isDD?'max(260px, calc(100dvh - 390px))':'max(260px, calc(100dvh - 280px))'}:{}) }}
           onPointerDown={e => { if (e.button === 0) gestureRef.current = { x: e.clientX, y: e.clientY, horizontal: false }; }}
@@ -1556,8 +1568,8 @@
           {sel ? <>
           <p className="font-bold text-app-text mb-2">{sel.date} · {sel.snapshot ? '조회 시세 반영 · 저장 안 함' : '원본 일별 데이터'}</p>
           <div className="grid grid-cols-2 gap-2">
-            {showUsd && <div className="bg-blue-50 rounded-lg p-2"><span className="text-xs text-app-blue font-bold">USD · {sel.usdSnapshot ? '조회' : '종가'}</span><p className="font-bold">{isDD ? formatPct(sel.usdDd) : sel.usdPrice === null ? '데이터 없음' : '$' + formatNum(sel.usdPrice)}</p></div>}
-            {showKrw && <div className="bg-green-50 rounded-lg p-2"><span className="text-xs text-app-green font-bold">KRW · {sel.krwSnapshot ? '조회 환산' : '종가'}</span><p className="font-bold">{isDD ? formatPct(sel.krwDd) : sel.krwPrice === null ? '데이터 없음' : formatKrw(sel.krwPrice)}</p></div>}
+            {showUsd && <div className="bg-blue-50 rounded-lg p-2"><span className="text-xs text-app-blue font-bold">USD · {sel.usdSnapshot ? '조회' : '종가'}</span><p className="font-bold">{Number.isFinite(sel.usdPrice) ? '$' + formatNum(sel.usdPrice) : '데이터 없음'}</p><p className="mt-1 text-xs text-app-subtext">낙폭 {formatPct(sel.usdDd)}</p></div>}
+            {showKrw && <div className="bg-green-50 rounded-lg p-2"><span className="text-xs text-app-green font-bold">KRW · {sel.krwSnapshot ? '조회 환산' : '종가'}</span><p className="font-bold">{Number.isFinite(sel.krwPrice) ? formatKrw(sel.krwPrice) : '데이터 없음'}</p><p className="mt-1 text-xs text-app-subtext">낙폭 {formatPct(sel.krwDd)}</p></div>}
           </div>
         </> : <p className="text-sm text-app-subtext">차트를 누르거나 날짜를 입력하면 원본 정보를 표시합니다.</p>}</div></details>
         

@@ -29,3 +29,9 @@ Apache 2.0 라이선스와 NOTICE는 docs/third-party에 보관합니다. 차트
 - A collapsed history table lists the selected period's crossovers newest first, with date, price, SMA60, SMA200 and confirmed/provisional status. Horizontally scrollable on mobile.
 - Selecting a row scrolls to the plot, pins its date and values, and restores inspection even when the same row is selected again.
 - Dots represent the observed crossover trading day at SMA60, not an interpolated intraday crossing price.
+
+## v2026.11.12.3: restore actual price inspection
+- Drawdown inspection now shows the source day's actual USD/KRW prices together with drawdowns, rather than percentages alone. Indexed-price charts also show actual prices separately from their indexed values.
+- Collapsed original-data panels retain prices and drawdowns on both charts. No display values are back-calculated from chart coordinates or sampled points.
+- Hover stays local. Click/tap commits and pins a date across the two charts, preventing competing hover/prop updates from desynchronizing the crosshair and price readout. Clear releases the pin.
+- Inspection area remains reserved and blank until interaction; data/history storage is unchanged.

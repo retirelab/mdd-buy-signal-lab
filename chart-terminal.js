@@ -57,10 +57,10 @@
         engine.current=state;
         const move=param=>{
           if(syncing.current)return;
-          // Keep a table selection stable while scrolling the plot under the pointer.
-          // A deliberate chart click releases it and starts normal inspection again.
-          if(pinned.current==='table'){
-            const chosen=latest.current.selectedDate,def=latest.current.series?.find(s=>s.data.some(r=>r.time===chosen&&Number.isFinite(r.value)));
+          // Keep committed selections stable; hover remains local to its own chart.
+          // A fresh click releases the old selection and commits a new date.
+          if(pinned.current){
+            const chosen=pinned.current,def=latest.current.series?.find(s=>s.data.some(r=>r.time===chosen&&Number.isFinite(r.value)));
             const point=def?.data.find(r=>r.time===chosen),item=def&&state.items.get(def.id);
             if(item&&point){syncing.current=true;try{chart.setCrosshairPosition(point.value,chosen,item.api);}catch{}finally{syncing.current=false;}}
             return;
@@ -69,9 +69,8 @@
           if(!date){if(!pinned.current){setHover(null);setInspecting(false);}return;}
           setInspecting(true);
           setHover(prev=>prev===date?prev:date);
-          latest.current.onSelectDate?.(date);
         };
-        const click=param=>{pinned.current=true;move(param);};
+        const click=param=>{const date=isoDay(param.time);if(!date)return;pinned.current=false;move(param);pinned.current=date;latest.current.onSelectDate?.(date);};
         chart.subscribeCrosshairMove(move);chart.subscribeClick(click);
         const rangeChanged=range=>{
           const from=isoDay(range?.from),to=isoDay(range?.to);
@@ -121,7 +120,7 @@
       const state=engine.current,date=props.selectedDate;
       const explicitSelection=previousSelectionKey.current!==props.selectionKey;
       if(previousDate.current===date&&!explicitSelection)return;previousDate.current=date;previousSelectionKey.current=props.selectionKey;
-      if(explicitSelection)pinned.current='table';
+      pinned.current=date;
       if(!state||!date)return;
       setInspecting(true);setHover(date);
       const def=series.find(s=>!hidden[s.id]&&s.data.some(r=>r.time===date&&Number.isFinite(r.value)));
@@ -160,9 +159,9 @@
         )
       ),
       h('div',{ref:host,className:'terminal-canvas',style:{height:props.height||'clamp(260px,34vw,340px)'},role:'group',tabIndex:0,onKeyDown:e=>{if(e.key==='Escape')clear();},'aria-label':props.label||'금융 차트'}),
-      h('div',{className:'terminal-inspector','data-testid':'terminal-inspector'},inspecting&&date?h(React.Fragment,null,
+      h('div',{className:'terminal-inspector'+(props.renderInspection?' with-prices':''),'data-testid':'terminal-inspector'},inspecting&&date?h(React.Fragment,null,
         h('div',{className:'terminal-inspector-date'},h('span',null,date),button('닫기',clear,false,{'aria-label':'선택값 닫기'})),
-        h('div',{className:'terminal-inspector-values'},series.filter(def=>!hidden[def.id]).map(def=>h('span',{key:def.id,style:{color:def.color}},def.label+' ',h('strong',null,formatValue(def.data.find(r=>r.time===date)?.value,kind)))))
+        props.renderInspection?props.renderInspection(date):h('div',{className:'terminal-inspector-values'},series.filter(def=>!hidden[def.id]).map(def=>h('span',{key:def.id,style:{color:def.color}},def.label+' ',h('strong',null,formatValue(def.data.find(r=>r.time===date)?.value,kind)))))
       ):h('p',{className:'terminal-idle-hint'},'터치·클릭으로 값 확인 · 가로 드래그로 이동'))
     );
   }
