@@ -15,7 +15,7 @@
   }
   function markersForSeries(series,markers){
     const dates=new Set(series.data.filter(r=>Number.isFinite(r.value)).map(r=>r.time));
-    return markers.filter(m=>m.seriesId===series.id&&dates.has(m.date)).map(m=>({time:m.date,position:'inBar',shape:'circle',color:m.color||series.color,text:m.text||'',size:1})).sort((a,b)=>a.time.localeCompare(b.time));
+    return markers.filter(m=>m.seriesId===series.id&&dates.has(m.date)).map(m=>({time:m.date,position:'inBar',shape:'circle',color:m.color||series.color,text:m.text||'',size:m.size||1})).sort((a,b)=>a.time.localeCompare(b.time));
   }
   function formatValue(value,kind){
     if(!Number.isFinite(value))return '—';
@@ -30,9 +30,9 @@
   function Plot(props){
     const React=root.React,h=React.createElement;
     const {useState,useRef,useEffect}=React;
-    const host=useRef(null),engine=useRef(null),latest=useRef(props),syncing=useRef(false),previousDate=useRef(props.selectedDate),pinned=useRef(false);
+    const host=useRef(null),engine=useRef(null),latest=useRef(props),syncing=useRef(false),previousDate=useRef(props.selectedDate),previousSelectionKey=useRef(props.selectionKey),pinned=useRef(false);
     latest.current=props;
-    const [failed,setFailed]=useState(false),[hover,setHover]=useState(null),[hidden,setHidden]=useState({}),[log,setLog]=useState(false),[visibleRange,setVisibleRange]=useState(null),[inspecting,setInspecting]=useState(false),[showMarkers,setShowMarkers]=useState(false);
+    const [failed,setFailed]=useState(false),[hover,setHover]=useState(null),[hidden,setHidden]=useState({}),[log,setLog]=useState(false),[visibleRange,setVisibleRange]=useState(null),[inspecting,setInspecting]=useState(false),[showMarkers,setShowMarkers]=useState(!!props.defaultShowMarkers);
     const series=props.series||EMPTY,markers=props.markers||EMPTY,references=props.references||EMPTY;
     const kind=props.kind||'number';
     const axisValue=value=>kind==='percent'?(value*100).toFixed(0)+'%':formatValue(value,kind);
@@ -57,6 +57,14 @@
         engine.current=state;
         const move=param=>{
           if(syncing.current)return;
+          // Keep a table selection stable while scrolling the plot under the pointer.
+          // A deliberate chart click releases it and starts normal inspection again.
+          if(pinned.current==='table'){
+            const chosen=latest.current.selectedDate,def=latest.current.series?.find(s=>s.data.some(r=>r.time===chosen&&Number.isFinite(r.value)));
+            const point=def?.data.find(r=>r.time===chosen),item=def&&state.items.get(def.id);
+            if(item&&point){syncing.current=true;try{chart.setCrosshairPosition(point.value,chosen,item.api);}catch{}finally{syncing.current=false;}}
+            return;
+          }
           const date=isoDay(param.time);
           if(!date){if(!pinned.current){setHover(null);setInspecting(false);}return;}
           setInspecting(true);
@@ -111,7 +119,9 @@
     },[references,series,hidden,kind]);
     useEffect(()=>{
       const state=engine.current,date=props.selectedDate;
-      if(previousDate.current===date)return;previousDate.current=date;
+      const explicitSelection=previousSelectionKey.current!==props.selectionKey;
+      if(previousDate.current===date&&!explicitSelection)return;previousDate.current=date;previousSelectionKey.current=props.selectionKey;
+      if(explicitSelection)pinned.current='table';
       if(!state||!date)return;
       setInspecting(true);setHover(date);
       const def=series.find(s=>!hidden[s.id]&&s.data.some(r=>r.time===date&&Number.isFinite(r.value)));
@@ -132,7 +142,7 @@
       }
       frame=requestAnimationFrame(apply);
       return ()=>{cancelled=true;cancelAnimationFrame(frame);};
-    },[props.selectedDate,series,hidden,kind]);
+    },[props.selectedDate,props.selectionKey,series,hidden,kind]);
     if(!root.LightweightCharts||failed)return h('div',null,h('p',{className:'mb-2 text-xs text-app-subtext'},'기본 차트로 표시 중입니다.'),props.fallback);
     const date=hover||props.selectedDate;
     function zoom(factor){const ts=engine.current?.chart.timeScale(),r=ts?.getVisibleLogicalRange();if(!r)return;const mid=(r.from+r.to)/2,half=(r.to-r.from)*factor/2;ts.setVisibleLogicalRange({from:mid-half,to:mid+half});}

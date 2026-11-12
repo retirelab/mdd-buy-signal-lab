@@ -86,7 +86,7 @@
   <script crossorigin src="https://unpkg.com/@babel/standalone@7.26.7/babel.min.js"></script>
 
   <script src="https://unpkg.com/lightweight-charts@5.1.0/dist/lightweight-charts.standalone.production.js"></script>
-  <script src="./chart-terminal.js?v=20261112.1"></script>
+  <script src="./chart-terminal.js?v=20261112.2"></script>
 
   <style>
     body {
@@ -676,7 +676,7 @@
     // -------------------------------------
     // UI Components
     // -------------------------------------
-    const HISTORY_VERSION = '2026.11.12.1';
+    const HISTORY_VERSION = '2026.11.12.2';
 
     function HistoryMethodNote() {
       return <div className="rounded-xl bg-amber-50 p-4 text-xs leading-relaxed text-amber-800 space-y-2">
@@ -825,6 +825,8 @@
 
     function MomentumPanel({ trend, confirmed, snapshot, startDate, endDate }) {
       const [selectedDate,setSelectedDate] = useState(null);
+      const [crossSelectionKey,setCrossSelectionKey] = useState(0);
+      const momentumChartRef=useRef(null);
       const gestureRef = useRef(null);
       const rows = useMemo(() => IndicatorTools.momentumRowsInRange(trend, startDate, endDate), [trend, startDate, endDate]);
       useEffect(() => { setSelectedDate(null); }, [startDate, endDate]);
@@ -833,7 +835,9 @@
         {id:'MA60',key:'sma60',label:'SMA 60',color:'#ef4444',width:1,toggleable:true},
         {id:'MA200',key:'sma200',label:'SMA 200',color:'#a855f7',width:1,toggleable:true}
       ]),[rows]);
-      const terminalMarkers=useMemo(()=>rows.filter(r=>r.cross).map(r=>({seriesId:'MA60',date:r.date,color:r.cross==='golden'?'#2563eb':'#f43f5e',text:r.cross==='golden'?'골든':'데드'})),[rows]);
+      const terminalMarkers=useMemo(()=>rows.filter(r=>r.cross).map(r=>({seriesId:'MA60',date:r.date,color:r.cross==='golden'?'#d97706':'#e11d48',text:'',size:1.5})),[rows]);
+      const crossRows=useMemo(()=>rows.filter(r=>r.cross).slice().reverse(),[rows]);
+      function selectCross(row){setSelectedDate(row.date);setCrossSelectionKey(key=>key+1);momentumChartRef.current?.scrollIntoView({behavior:"smooth",block:"start"});}
       const last = rows[rows.length-1];
       const selected = rows.find(r=>r.date===selectedDate) || last;
       const money = n => n === null ? '데이터 부족' : '$'+n.toFixed(2);
@@ -886,7 +890,7 @@
         <ChartViewer title="60일·200일 이동평균 차트">{expanded=><div>
         <div className="hidden mt-4 flex flex-wrap gap-x-4 gap-y-1 text-[11px] font-semibold"><span className="text-app-blue">━ 가격</span><span className="text-amber-700">━ 60일선</span><span className="text-purple-700">┄ 200일선</span><span className="text-app-subtext">선택 기간 · {rows.length.toLocaleString()}거래일</span></div>
         <p className="hidden" data-testid="momentum-range">선택 기간 {rows[0].date} ~ {last.date}</p>
-        <TerminalPlot series={terminalSeries} markers={terminalMarkers} selectedDate={selected.date} onSelectDate={setSelectedDate} kind="usd" expanded={expanded} testId="terminal-momentum" label="이동평균 금융 차트" height={expanded?'max(320px, calc(100dvh - 300px))':undefined} fallback={<div className="relative mt-2 h-48 sm:h-64 w-full rounded-lg bg-white" style={expanded?{height:"max(260px, calc(100dvh - 260px))"}:undefined}><svg data-testid="momentum-chart" viewBox={`0 0 ${d.width} ${d.height}`} className="h-full w-full" preserveAspectRatio="none" style={{touchAction:'pan-y'}} role="img" aria-label="달러 가격과 60일·200일 이동평균선. 차트 아래 날짜에서 일별 수치를 조회할 수 있습니다."
+        <div ref={momentumChartRef} style={{scrollMarginTop:"72px"}}><TerminalPlot series={terminalSeries} markers={terminalMarkers} defaultShowMarkers={true} selectionKey={crossSelectionKey} selectedDate={selected.date} onSelectDate={setSelectedDate} kind="usd" expanded={expanded} testId="terminal-momentum" label="이동평균 금융 차트" height={expanded?'max(320px, calc(100dvh - 300px))':undefined} fallback={<div className="relative mt-2 h-48 sm:h-64 w-full rounded-lg bg-white" style={expanded?{height:"max(260px, calc(100dvh - 260px))"}:undefined}><svg data-testid="momentum-chart" viewBox={`0 0 ${d.width} ${d.height}`} className="h-full w-full" preserveAspectRatio="none" style={{touchAction:'pan-y'}} role="img" aria-label="달러 가격과 60일·200일 이동평균선. 차트 아래 날짜에서 일별 수치를 조회할 수 있습니다."
           onPointerDown={e=>{if(e.button===0)gestureRef.current={x:e.clientX,y:e.clientY,horizontal:false};}}
           onPointerMove={e=>{const g=gestureRef.current;if(!g)return;const dx=Math.abs(e.clientX-g.x),dy=Math.abs(e.clientY-g.y);if(!g.horizontal&&dy>8&&dy>dx){gestureRef.current=null;return;}if(dx>8&&dx>dy){g.horizontal=true;e.currentTarget.setPointerCapture(e.pointerId);}if(g.horizontal)selectAt(e.clientX,e.currentTarget);}}
           onPointerUp={e=>{const g=gestureRef.current;if(g&&(g.horizontal||Math.abs(e.clientY-g.y)<8))selectAt(e.clientX,e.currentTarget);gestureRef.current=null;}} onPointerCancel={()=>{gestureRef.current=null;}}>
@@ -894,13 +898,30 @@
           <path data-ma-line="price" d={d.price} fill="none" stroke="#3182f6" strokeWidth="1.5"/>
           <path data-ma-line="60" d={d.fast} fill="none" stroke="#ef4444" strokeWidth="2"/>
           <path data-ma-line="200" d={d.slow} fill="none" stroke="#7e22ce" strokeWidth="2" strokeDasharray="6 3"/>
-          {rows.filter(r=>r.cross).map(r=><circle key={r.date} cx={d.x(r)} cy={d.y(r.sma60)} r="4" fill={r.cross==='golden'?'#3182f6':'#FF477E'}><title>{name(r.cross)} {r.date}{snapshot&&r.date===trend.date?' · 잠정':''}</title></circle>)}
+          {rows.filter(r=>r.cross).map(r=><circle key={r.date} cx={d.x(r)} cy={d.y(r.sma60)} r="4" fill={r.cross==='golden'?'#d97706':'#e11d48'}><title>{name(r.cross)} {r.date}{snapshot&&r.date===trend.date?' · 잠정':''}</title></circle>)}
           <line x1={d.x(selected)} x2={d.x(selected)} y1={d.top} y2={d.height-d.bottom} stroke="#94a3b8" strokeDasharray="3 4"/>
           {[['price','#3182f6'],['sma60','#ef4444'],['sma200','#7e22ce']].map(([key,color])=>selected[key]!==null&&<circle key={key} cx={d.x(selected)} cy={d.y(selected[key])} r="3" fill={color}/>)}
         </svg>
           {[0,.5,1].map(f=>{const value=d.min+(d.max-d.min)*f;return <span key={f} className="absolute left-0 pr-1 text-right text-[10px] text-app-subtext pointer-events-none -translate-y-1/2" style={{top:`${d.y(value)/d.height*100}%`,width:`${d.left/d.width*100}%`}}>{value.toFixed(0)}</span>;})}
           <div className="absolute bottom-1 flex justify-between text-[10px] text-app-subtext pointer-events-none" style={{left:`${d.left/d.width*100}%`,right:`${d.right/d.width*100}%`}}><span>{rows[0].date}</span>{rows.length>1 && <span>{new Date((Date.parse(rows[0].date)+Date.parse(last.date))/2).toISOString().slice(0,7)}</span>}<span>{last.date}</span></div>
         </div>} />
+        </div><div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11px]" aria-label="교차점 색상 안내"><span className="text-amber-700">● 골든크로스</span><span className="text-rose-600">● 데드크로스</span></div>
+        <details className="mt-3 rounded-xl border border-gray-200 bg-white p-3 text-xs" data-testid="momentum-cross-history">
+          <summary className="cursor-pointer font-semibold">교차 이력 · {crossRows.length}건</summary>
+          <p className="mt-2 text-[11px] text-app-subtext">선택 기간 내 교차 · 최신순. 행을 누르면 차트에서 확인합니다. 표는 좌우로 밀어 볼 수 있습니다.</p>
+          {crossRows.length ? <div className="mt-2 max-h-72 overflow-auto rounded-lg border border-gray-100" role="region" aria-label="이동평균 교차 이력표" tabIndex="0">
+            <table className="w-full min-w-[540px] text-left text-[11px] tabular-nums">
+              <thead className="bg-gray-50 text-app-subtext"><tr>{['종류','날짜','가격(USD)','60일선','200일선','기준'].map(label=><th key={label} scope="col" className="whitespace-nowrap px-3 py-2 font-semibold">{label}</th>)}</tr></thead>
+              <tbody>{crossRows.map(row=><tr key={row.date} data-cross-date={row.date} onClick={()=>selectCross(row)} className={`cursor-pointer border-t border-gray-100 hover:bg-blue-50 ${selectedDate===row.date?'bg-blue-50':''}`}>
+                <td className={`whitespace-nowrap px-3 py-3 font-semibold ${row.cross==='golden'?'text-amber-700':'text-rose-600'}`}>● {name(row.cross)}</td>
+                <td className="px-3 py-3"><button type="button" onClick={e=>{e.stopPropagation();selectCross(row);}} aria-label={`${row.date} ${name(row.cross)} 차트에서 보기`} className="whitespace-nowrap rounded text-app-blue underline underline-offset-2 focus-visible:outline focus-visible:outline-2">{row.date}</button></td>
+                <td className="whitespace-nowrap px-3 py-3">{money(row.price)}</td><td className="whitespace-nowrap px-3 py-3">{money(row.sma60)}</td><td className="whitespace-nowrap px-3 py-3">{money(row.sma200)}</td>
+                <td className="whitespace-nowrap px-3 py-3">{snapshot&&row.date===trend.date?'조회·잠정':'확정 종가'}</td>
+              </tr>)}</tbody>
+            </table>
+          </div> : <p className="mt-3 text-app-subtext">선택한 기간에는 교차가 없습니다. 기간을 넓혀 확인해보세요.</p>}
+          <p className="mt-2 text-[11px] text-app-subtext">점은 교차가 확인된 거래일의 60일선 값에 표시합니다. 조회 시세로 계산한 당일 교차는 잠정입니다.</p>
+        </details>
         <details className="mt-3 rounded-xl bg-white p-3 text-xs" data-testid="momentum-info"><summary className="cursor-pointer text-app-subtext">날짜 직접 조회·상세값</summary><label className="flex flex-wrap items-center justify-between gap-2 font-semibold">날짜별 조회<input type="date" aria-label="모멘텀 조회 날짜" min={rows[0].date} max={last.date} value={selected.date} onChange={e=>selectDate(e.target.value)} onInput={e=>selectDate(e.currentTarget.value)} onBlur={e=>selectDate(e.currentTarget.value)} className="min-w-0 rounded-lg border border-gray-200 bg-white px-2 py-1"/></label><p className="mt-2 leading-relaxed">{selected.date}{snapshot&&selected.date===trend.date?' · 조회 시세 잠정':''}<br/>가격 {money(selected.price)} · 60일 {money(selected.sma60)} · 200일 {money(selected.sma200)}</p></details>
         </div>}</ChartViewer>
         <details className="mt-3 text-xs leading-relaxed text-app-subtext"><summary className="cursor-pointer">골든·데드크로스 해석</summary><p className="mt-2">60일선이 200일선을 아래에서 위로 넘어가면 골든크로스, 위에서 아래로 내려가면 데드크로스입니다. 두 선이 닿기만 하고 원래 위치로 돌아오면 새 교차로 세지 않습니다. 현재 위·아래에 있는 상태와 교차 발생일은 다릅니다. 60·200거래일의 평균으로 계산하며 차트 앞의 가격도 포함합니다. 두 선의 간격은 (60일 평균 ÷ 200일 평균 − 1)입니다. 교차는 추세 전환의 참고 신호로, 반응이 늦거나 횡보 중 반복될 수 있습니다. 기존 낙폭·공포 조건과 별도로 표시합니다.</p></details>

@@ -23,3 +23,9 @@ Apache 2.0 라이선스와 NOTICE는 docs/third-party에 보관합니다. 차트
 - Zoom, scale mode, optional MA lines and event markers are in Chart settings.
 - Direct date lookup, source values, trend numbers and target adjustment use collapsed disclosures. Mobile plots have smaller outer padding and compact percentage axes.
 - Browser QA: desktop and 390px viewport, popup opening, click inspection/clearing, direct date selection and MA visibility toggles. Node regression suite: 59 pass.
+
+## v2026.11.12.2: crossover dots and history
+- Momentum charts enable crossover markers by default, using amber for golden crosses and rose for death crosses, without text on the canvas. Other chart markers retain their prior defaults.
+- A collapsed history table lists the selected period's crossovers newest first, with date, price, SMA60, SMA200 and confirmed/provisional status. Horizontally scrollable on mobile.
+- Selecting a row scrolls to the plot, pins its date and values, and restores inspection even when the same row is selected again.
+- Dots represent the observed crossover trading day at SMA60, not an interpolated intraday crossing price.
