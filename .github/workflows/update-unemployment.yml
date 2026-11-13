@@ -1,0 +1,33 @@
+name: Update US unemployment CSV
+on:
+  schedule:
+    - cron: '15 14 * * *' # 23:15 Asia/Seoul, after US morning releases
+  workflow_dispatch:
+  push:
+    paths:
+      - scripts/update_unemployment.py
+      - .github/workflows/update-unemployment.yml
+concurrency:
+  group: update-price-data
+  cancel-in-progress: false
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Fetch public FRED CSV without API key
+        run: python scripts/update_unemployment.py
+      - name: Commit data and fetch status
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/macro/
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m "Update UNRATE CSV and collection status"
+          git pull --rebase origin "${{ github.ref_name }}"
+          git push

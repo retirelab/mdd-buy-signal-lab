@@ -86,8 +86,9 @@
   <script crossorigin src="https://unpkg.com/@babel/standalone@7.26.7/babel.min.js"></script>
 
   <script src="https://unpkg.com/lightweight-charts@5.1.0/dist/lightweight-charts.standalone.production.js"></script>
-  <script src="./asset-settings.js?v=20261113.1"></script>
-  <script src="./chart-terminal.js?v=20261113.1"></script>
+  <script src="./unemployment-tools.js?v=20261113.2"></script>
+  <script src="./asset-settings.js?v=20261113.2"></script>
+  <script src="./chart-terminal.js?v=20261113.2"></script>
 
   <style>
     body {
@@ -684,7 +685,7 @@
     // -------------------------------------
     // UI Components
     // -------------------------------------
-    const HISTORY_VERSION = '2026.11.13.1';
+    const HISTORY_VERSION = '2026.11.13.2';
 
     function HistoryMethodNote() {
       return <div className="rounded-xl bg-amber-50 p-4 text-xs leading-relaxed text-amber-800 space-y-2">
@@ -933,6 +934,35 @@
         <details className="mt-3 rounded-xl bg-white p-3 text-xs" data-testid="momentum-info"><summary className="cursor-pointer text-app-subtext">날짜 직접 조회·상세값</summary><label className="flex flex-wrap items-center justify-between gap-2 font-semibold">날짜별 조회<input type="date" aria-label="모멘텀 조회 날짜" min={rows[0].date} max={last.date} value={selected.date} onChange={e=>selectDate(e.target.value)} onInput={e=>selectDate(e.currentTarget.value)} onBlur={e=>selectDate(e.currentTarget.value)} className="min-w-0 rounded-lg border border-gray-200 bg-white px-2 py-1"/></label><p className="mt-2 leading-relaxed">{selected.date}{snapshot&&selected.date===trend.date?' · 조회 시세 잠정':''}<br/>가격 {money(selected.price)} · 60일 {money(selected.sma60)} · 200일 {money(selected.sma200)}</p></details>
         </div>}</ChartViewer>
         <details className="mt-3 text-xs leading-relaxed text-app-subtext"><summary className="cursor-pointer">골든·데드크로스 해석</summary><p className="mt-2">60일선이 200일선을 아래에서 위로 넘어가면 골든크로스, 위에서 아래로 내려가면 데드크로스입니다. 두 선이 닿기만 하고 원래 위치로 돌아오면 새 교차로 세지 않습니다. 현재 위·아래에 있는 상태와 교차 발생일은 다릅니다. 60·200거래일의 평균으로 계산하며 차트 앞의 가격도 포함합니다. 두 선의 간격은 (60일 평균 ÷ 200일 평균 − 1)입니다. 교차는 추세 전환의 참고 신호로, 반응이 늦거나 횡보 중 반복될 수 있습니다. 기존 낙폭·공포 조건과 별도로 표시합니다.</p></details>
+      </section>;
+    }
+
+    function UnemploymentPanel(){
+      const [payload,setPayload]=useState(null),[status,setStatus]=useState(null),[error,setError]=useState(''),[open,setOpen]=useState(false),[months,setMonths]=useState('60'),[selected,setSelected]=useState(null);
+      useEffect(()=>{let cancelled=false;Promise.allSettled([fetch('./data/macro/UNRATE.json',{cache:'no-store'}).then(r=>{if(!r.ok)throw Error('자료 조회 실패');return r.json();}),fetch('./data/macro/UNRATE-status.json',{cache:'no-store'}).then(r=>{if(!r.ok)throw Error('상태 조회 실패');return r.json();})]).then(([data,check])=>{if(cancelled)return;if(data.status==='fulfilled')setPayload(data.value);else setError('실업률 자료를 불러오지 못했습니다.');if(check.status==='fulfilled')setStatus(check.value);});return()=>{cancelled=true;};},[]);
+      const model=useMemo(()=>UnemploymentTools.calculate(payload?.observations),[payload]);
+      const rows=useMemo(()=>months==='all'?model.rows:model.rows.slice(-Number(months)),[model,months]);
+      const series=useMemo(()=>ChartTerminal.prepareSeries(rows,[{id:'rate',key:'value',label:'실업률 (%)',color:'#2563eb',width:2},{id:'mean',key:'mean',label:'12개월 평균 (%)',color:'#d97706',width:1}]),[rows]);
+      const latest=model.latest;
+      const stamp=value=>value?new Date(value).toLocaleString('ko-KR',{timeZone:'Asia/Seoul',hour12:false})+' KST':'자동 수집 확인 대기';
+      return <section className="my-5 rounded-2xl border border-gray-200 bg-gray-50 p-4" data-testid="unemployment-panel">
+        <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="text-sm font-bold">미국 실업률 · FRED UNRATE</h3><span className="text-[11px] text-app-subtext">월간 · 계절조정</span></div>
+        {!latest?<p className="mt-3 text-xs text-app-subtext">{error||'실업률 자료 조회 중…'}</p>:<>
+          <p className="mt-2 text-xs text-app-subtext">기준월 {latest.date.slice(0,7)} · 미국 전체 지표</p>
+          <div className="mt-3 grid grid-cols-2 gap-3"><div className="rounded-xl bg-white p-3"><p className="text-xs text-app-subtext">최신 실업률</p><p className="mt-1 text-2xl font-bold text-app-blue">{latest.value.toFixed(1)}%</p></div><div className="rounded-xl bg-white p-3"><p className="text-xs text-app-subtext">최근 12개월 평균</p><p className="mt-1 text-2xl font-bold">{latest.mean===null?'자료 부족':latest.mean.toFixed(2)+'%'}</p></div></div>
+          <p className="mt-3 text-sm font-semibold">{latest.gap===null?'연속된 12개월의 자료가 필요합니다.':Math.abs(latest.gap)<.005?'최근 1년 평균과 같은 수준':`최근 1년 평균보다 ${Math.abs(latest.gap).toFixed(2)}%p ${latest.gap>0?'높음':'낮음'}`}</p>
+          <p className="mt-2 text-[11px] text-app-subtext">최신 월을 포함한 12개월 평균입니다. 가격 조회 기간·선택 자산과 별도로 최신 자료를 표시합니다.</p>
+          {status?.ok===false&&<p role="status" className="mt-2 text-xs text-amber-700">최근 자동 수집 실패 · 마지막 정상 자료를 표시합니다.</p>}
+          <p className="mt-2 text-[11px] text-app-subtext">마지막 수집 확인: {stamp(status?.checkedAt)}{status?.ok===true?' · 성공':''}</p>
+          <details className="mt-3 text-xs" onToggle={e=>setOpen(e.currentTarget.open)}><summary className="cursor-pointer font-semibold">실업률·평균선 차트와 월별 기록</summary>
+          {open&&<div className="mt-3"><label className="mb-2 flex items-center gap-2 text-app-subtext">표시 기간<select aria-label="실업률 차트 기간" value={months} onChange={e=>{setMonths(e.target.value);setSelected(null);}} className="rounded-lg border bg-white p-2"><option value="60">최근 5년</option><option value="120">최근 10년</option><option value="all">전체 기록</option></select></label>
+            <TerminalPlot series={series} selectedDate={selected} onSelectDate={setSelected} label="미국 실업률과 12개월 평균 차트" testId="terminal-unemployment" fallback={<p className="p-3 text-app-subtext">차트를 불러올 수 없습니다. 아래 월별 표를 확인해주세요.</p>}/>
+            <p className="mt-3 text-[11px] text-app-subtext">최근 24개월 · 전체 {model.rows.length}개월 저장. 미발표·결측 월은 평균 계산에서 건너뛰지 않고 자료 부족으로 표시합니다.</p>
+            <div className="mt-2 max-h-64 overflow-auto rounded-lg border bg-white"><table className="w-full text-right text-[11px] tabular-nums"><thead><tr className="bg-gray-100">{['기준월','실업률','12개월 평균','차이 (%p)'].map(t=><th scope="col" key={t} className="p-2 whitespace-nowrap">{t}</th>)}</tr></thead><tbody>{model.rows.slice(-24).reverse().map(r=><tr key={r.date} className="border-t"><td className="p-2">{r.date.slice(0,7)}</td><td className="p-2">{r.value===null?'미발표':r.value.toFixed(1)+'%'}</td><td className="p-2">{r.mean===null?'자료 부족':r.mean.toFixed(2)+'%'}</td><td className="p-2">{r.gap===null?'—':(r.gap>=0?'+':'')+r.gap.toFixed(2)}</td></tr>)}</tbody></table></div>
+          </div>}
+          </details>
+        </>}
+        <p className="mt-3 text-[11px] leading-relaxed text-app-subtext">출처: BLS / <a className="underline" href="https://fred.stlouisfed.org/series/UNRATE" target="_blank" rel="noopener noreferrer">FRED UNRATE</a>. 월별 통계는 사후 수정될 수 있습니다. 이 지표는 보조 정보이며 기존 매수 조건·과거 회복 통계에는 적용하지 않습니다.</p>
       </section>;
     }
 
@@ -2326,6 +2356,7 @@
                     })()}
                   </div>
                 )}
+              <UnemploymentPanel />
               <IndicatorPanel model={indicatorState.model} snapshot={indicatorState.snapshot} source={dataSource} confirmedMomentum={indicatorState.confirmedMomentum} startDate={settings.startDate} endDate={settings.endDate} /></Card></div>;}
 
       function renderSettings() {
