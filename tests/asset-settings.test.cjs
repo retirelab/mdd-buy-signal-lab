@@ -1,0 +1,3 @@
+const {test}=require('node:test'),a=require('node:assert/strict'),S=require('../asset-settings.js');
+test('legacy threshold migrates only to the previously selected asset',()=>{let s={symbol:'SPY',targetDdPct:-15};s=S.update(s,p=>({...p,symbol:'QQQ'}));a.equal(s.targetDdPct,-20);s=S.update(s,p=>({...p,symbol:'SPY'}));a.equal(s.targetDdPct,-15);});
+test('asset edits, presets and reload preserve independent thresholds',()=>{let s={symbol:'SPY',targetDdPct:-20};s=S.update(s,p=>({...p,targetDdPct:'-30'}));s=S.update(s,p=>({...p,symbol:'QQQ'}));s=S.update(s,p=>({...p,targetDdPct:-10}));s=S.normalize(JSON.parse(JSON.stringify(s)));a.equal(s.targetDdPct,-10);s=S.update(s,p=>({...p,symbol:'SPY'}));a.equal(s.targetDdPct,-30);a.equal(s.targetDdBySymbol.QQQ,-10);});

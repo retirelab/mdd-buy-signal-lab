@@ -86,7 +86,8 @@
   <script crossorigin src="https://unpkg.com/@babel/standalone@7.26.7/babel.min.js"></script>
 
   <script src="https://unpkg.com/lightweight-charts@5.1.0/dist/lightweight-charts.standalone.production.js"></script>
-  <script src="./chart-terminal.js?v=20261112.3"></script>
+  <script src="./asset-settings.js?v=20261113.1"></script>
+  <script src="./chart-terminal.js?v=20261113.1"></script>
 
   <style>
     body {
@@ -96,6 +97,8 @@
       -webkit-font-smoothing: antialiased;
     }
 
+    .compact-quote { padding:16px !important; }
+    .compact-quote > div:first-child { margin-bottom:12px; }
     .terminal-shell { border:1px solid #dce2ea; border-radius:14px; background:#fff; overflow:hidden; box-shadow:0 3px 14px rgba(15,23,42,.035); }
     .terminal-toolbar { display:flex; flex-wrap:wrap; justify-content:space-between; align-items:center; gap:10px; padding:12px 12px 8px; }
     .terminal-legend { display:flex; flex-wrap:wrap; align-items:center; gap:8px; min-width:0; }
@@ -681,7 +684,7 @@
     // -------------------------------------
     // UI Components
     // -------------------------------------
-    const HISTORY_VERSION = '2026.11.12.3';
+    const HISTORY_VERSION = '2026.11.13.1';
 
     function HistoryMethodNote() {
       return <div className="rounded-xl bg-amber-50 p-4 text-xs leading-relaxed text-amber-800 space-y-2">
@@ -955,9 +958,21 @@
       </div>;
     }
 
-    function LiveQuotePanel({ symbol, usdEngine, krwEngine, dataSource, onQuote, rawData }) {
-      const [endpoint, setEndpoint] = useLocalStorage('retirelab_google_quote_endpoint_v1', '');
-      const [draft, setDraft] = useState(endpoint);
+    function QuoteConnectionSettings({endpoint,setEndpoint}) {
+      const [draft,setDraft]=useState(endpoint),[error,setError]=useState('');
+      return <Card title="시세 연결 설정">        <div>
+          
+          <p className="my-3 text-xs text-app-subtext">계좌 정보가 없는 시세 전용 Apps Script 웹앱 주소를 등록하세요. 주소는 이 브라우저에 저장됩니다.</p>
+          <form onSubmit={e => { e.preventDefault(); try { const url = QuoteTools.endpointUrl(draft.trim()); setEndpoint(url); setError(''); } catch (err) { setError(err.message); } }} className="space-y-2">
+            <label className="block text-xs font-bold" htmlFor="google-quotes-endpoint">Google 시세 웹앱 주소</label>
+            <input id="google-quotes-endpoint" value={draft} onChange={e => setDraft(e.target.value)} className="w-full rounded-lg border border-gray-200 p-2 text-xs" placeholder="https://script.google.com/macros/s/…/exec" />
+            <div className="flex gap-2"><button className="rounded-lg bg-app-blue px-3 py-2 text-xs text-white" type="submit">연결하고 조회</button><button className="rounded-lg bg-gray-100 px-3 py-2 text-xs" type="button" onClick={() => {setEndpoint('');setDraft('');}}>연결 해제</button></div>
+          </form>
+          <a className="mt-3 block text-xs font-bold text-app-blue underline" href="https://github.com/retirelab/mdd-buy-signal-lab/blob/main/docs/google-quotes-setup.md" target="_blank" rel="noopener noreferrer">설치 코드와 연결 방법</a>
+        </div>{error&&<p className="text-xs text-red-600">{error}</p>}</Card>;
+    }
+
+    function LiveQuotePanel({ endpoint, symbol, usdEngine, krwEngine, dataSource, onQuote, rawData }) {
       const [quote, setQuote] = useState(null);
       const [error, setError] = useState('');
       const [busy, setBusy] = useState(false);
@@ -987,33 +1002,25 @@
       const applied = quote && dataSource === 'FETCHED' ? QuoteTools.applySnapshot(usdEngine, quote, 'USD', rawData, symbol) : null;
       const comparison = applied?.quoteInfo ? {dd:applied.metrics.currentDd, reached:applied.target.isTriggered, targetPrice:applied.target.price, remaining:applied.target.price / quote.price - 1} : null;
       const stamp = value => value ? new Date(value).toLocaleString('ko-KR', {timeZone:'Asia/Seoul',hour12:false}) + ' KST' : '확인 불가';
-      return <Card title={`${symbol} 현재 제공 시세`} titleRight={<button type="button" disabled={busy || !endpoint} onClick={refresh} className="rounded-xl bg-app-blue px-3 py-2 text-xs font-bold text-white disabled:opacity-40">{busy ? '조회 중…' : '현재가 새로고침'}</button>}>
-        <div className={endpoint ? "min-h-[280px] space-y-3" : "space-y-3"} aria-live="polite">
-          {!endpoint && <p className="text-sm text-app-subtext">Google 시세 연결이 필요합니다. 아래 ‘시세 연결 설정’에서 웹앱 주소를 등록하면 앱 진입 시 자동 조회합니다.</p>}
+      return <Card className="compact-quote" title={`${symbol} 조회 시세`} titleRight={<button type="button" disabled={busy || !endpoint} onClick={refresh} className="rounded-xl bg-app-blue px-3 py-2 text-xs font-bold text-white disabled:opacity-40">{busy ? '조회 중…' : '현재가 새로고침'}</button>}>
+        <div className={endpoint ? "space-y-3" : "space-y-3"} aria-live="polite">
+          {!endpoint && <p className="text-sm text-app-subtext">Google 시세 연결이 필요합니다. 설정 탭의 ‘시세 연결 설정’에서 웹앱 주소를 등록하면 앱 진입 시 자동 조회합니다.</p>}
           {endpoint && !quote && <p className="text-sm text-app-subtext">{busy ? 'Google 제공 시세를 조회하고 있습니다.' : '장중 시세를 가져오지 못했습니다. 기존 최근 종가를 참고해주세요.'}</p>}
           {quote && <>
             <div className="grid grid-cols-2 gap-3">
               <div className="rounded-xl bg-app-blueLight p-3"><p className="text-xs text-app-blue">USD · {age <= 60 ? '장중 참고 시세' : '최근 거래 시세'}</p><p className="text-xl font-extrabold">${formatNum(quote.price)}</p></div>
               <div className="rounded-xl bg-app-greenLight p-3"><p className="text-xs text-app-green">KRW · 조회 환율로 환산</p><p className="text-xl font-extrabold">{quote.fx ? formatKrw(quote.price * quote.fx) : '환율 확인 불가'}</p></div>
             </div>
-            <p className="text-xs leading-relaxed text-app-subtext">거래 시각: {stamp(quote.tradeAt)}<br />앱 조회: {stamp(quote.fetchedAt)} · 제공 지연: {quote.delayMinutes === null ? '확인 불가' : `${quote.delayMinutes}분`}<br />Google Finance는 최대 20분 지연될 수 있습니다. 새로고침은 Google 원천 시세의 즉시 갱신을 보장하지 않습니다.</p>
+            <details className="text-xs text-app-subtext"><summary className="cursor-pointer">시세 시각·적용 정보</summary>            <p className="text-xs leading-relaxed text-app-subtext">거래 시각: {stamp(quote.tradeAt)}<br />앱 조회: {stamp(quote.fetchedAt)} · 제공 지연: {quote.delayMinutes === null ? '확인 불가' : `${quote.delayMinutes}분`}<br />Google Finance는 최대 20분 지연될 수 있습니다. 새로고침은 Google 원천 시세의 즉시 갱신을 보장하지 않습니다.</p>
             {comparison ? <p className="rounded-xl bg-gray-50 p-3 text-sm">달러 종가 최고가 대비 장중 참고 하락: <b>{formatPct(comparison.dd)}</b><br />{comparison.reached ? '설정한 종가 기준 가격에 도달했습니다.' : `종가 기준 목표 $${formatNum(comparison.targetPrice)}까지 현재 제공 가격에서 추가 ${formatPct(Math.min(0, comparison.remaining))} 필요`}</p>
               : <p className="text-xs text-app-subtext">이 분석 기간에는 조회 시세를 적용할 수 없거나 종가와 가격 기준이 다릅니다. 해당 영역은 종가 기준으로 유지합니다.</p>}
+</details>
             {error && <p className="text-xs text-amber-700">이번 갱신 실패 · 위 가격은 직전 조회값입니다.</p>}
           </>}
           {error && <p role="status" className="text-xs text-red-600">{error}</p>}
         </div>
-        <p className="mt-3 text-xs leading-relaxed text-app-subtext">조회 시세는 현재가·현재 낙폭·매수 조건·차트의 마지막 지점에 반영합니다. 종가 파일과 과거 회복 통계는 변경하지 않습니다. 장 마감 후에는 최근 거래일 가격이 표시되며, 원화 환산액은 주가와 환율의 관측 시각이 다를 수 있습니다.</p>
-        <details className="mt-4 rounded-xl border border-gray-100 p-3">
-          <summary className="cursor-pointer text-sm font-bold">시세 연결 설정</summary>
-          <p className="my-3 text-xs text-app-subtext">계좌 정보가 없는 시세 전용 Apps Script 웹앱 주소를 등록하세요. 주소는 이 브라우저에 저장됩니다.</p>
-          <form onSubmit={e => { e.preventDefault(); try { const url = QuoteTools.endpointUrl(draft.trim()); setEndpoint(url); setError(''); } catch (err) { setError(err.message); } }} className="space-y-2">
-            <label className="block text-xs font-bold" htmlFor="google-quotes-endpoint">Google 시세 웹앱 주소</label>
-            <input id="google-quotes-endpoint" value={draft} onChange={e => setDraft(e.target.value)} className="w-full rounded-lg border border-gray-200 p-2 text-xs" placeholder="https://script.google.com/macros/s/…/exec" />
-            <div className="flex gap-2"><button className="rounded-lg bg-app-blue px-3 py-2 text-xs text-white" type="submit">연결하고 조회</button><button className="rounded-lg bg-gray-100 px-3 py-2 text-xs" type="button" onClick={() => {setEndpoint('');setDraft('');}}>연결 해제</button></div>
-          </form>
-          <a className="mt-3 block text-xs font-bold text-app-blue underline" href="https://github.com/retirelab/mdd-buy-signal-lab/blob/main/docs/google-quotes-setup.md" target="_blank" rel="noopener noreferrer">설치 코드와 연결 방법</a>
-        </details>
+        <p className="mt-2 text-[11px] text-app-subtext">조회 시세는 지연될 수 있으며 종가 기록과 회복 통계는 그대로 유지합니다.</p>
+
       </Card>;
     }
 
@@ -1622,7 +1629,7 @@
 
       const [activeTab, setActiveTab] = useState('dashboard');
       const [showVerify, setShowVerify] = useState(false);
-      const [showWhy, setShowWhy] = useState(false);
+      const [showWhy, setShowWhy] = useState(true);
       const [showChart, setShowChart] = useState(false);
       const [showHistory, setShowHistory] = useState(false);
       const [showDetailTable, setShowDetailTable] = useState(false);
@@ -1639,7 +1646,10 @@
 
       const verifyRef = useRef(null);
       const detailTableRef = useRef(null);
-      const [settings, setSettings] = useLocalStorage('mdd_settings_fixed_v1', DEFAULT_SETTINGS);
+      const [storedSettings,setStoredSettings]=useLocalStorage('mdd_settings_fixed_v1',DEFAULT_SETTINGS);
+      const settings=useMemo(()=>AssetSettings.normalize(storedSettings),[storedSettings]);
+      function setSettings(change){setStoredSettings(prev=>AssetSettings.update(prev,change));}
+      const [quoteEndpoint,setQuoteEndpoint]=useLocalStorage('retirelab_google_quote_endpoint_v1','');
       const [reloadToken, setReloadToken] = useState(0);
       const [rawData, setRawData] = useState([]);
       const [indicatorFxRows, setIndicatorFxRows] = useState([]);
@@ -2008,45 +2018,11 @@
         return (
           <div className="space-y-4 pb-20">
 
-            {/* ============ 1단계: 히어로 ============ */}
-            <div className={`rounded-[32px] p-8 md:p-12 text-center border transition-colors duration-500 shadow-sm ${heroConfig.bg}`}>
-              <div className="">
-                <div className="w-20 h-20 md:w-24 md:h-24 bg-white rounded-full mx-auto mb-5 flex items-center justify-center text-4xl md:text-5xl shadow-btn">
-                  {heroConfig.emoji}
-                </div>
-
-                <h2 className={`text-2xl md:text-3xl font-black mb-2 tracking-tight ${heroConfig.text}`}>
-                  {heroConfig.title}
-                </h2>
-                <p className="text-sm md:text-base font-medium text-app-subtext">
-                  {heroConfig.sub}
-                </p>
-
-                {/* 조건 인디케이터 - 2개 */}
-                {!isLoading && primary && (
-                  <div className="flex justify-center gap-6 mt-8">
-                    <div className="flex flex-col items-center gap-2">
-                      <div className={`w-12 h-12 rounded-2xl flex items-center justify-center text-lg font-bold transition-all ${
-                        displayState.gates.fearGate ? 'bg-app-green text-white shadow-md' : 'bg-white text-gray-300 border border-gray-100'
-                      }`}>
-                        {displayState.gates.fearGate ? '✓' : '—'}
-                      </div>
-                      <span className={`text-xs font-bold ${displayState.gates.fearGate ? 'text-app-green' : 'text-app-subtext'}`}>공포 지수</span>
-                    </div>
-                    <div className="flex flex-col items-center gap-2">
-                      <div className={`w-12 h-12 rounded-2xl flex items-center justify-center text-lg font-bold transition-all ${
-                        displayState.gates.ddGate ? 'bg-app-pink text-white shadow-md' : 'bg-white text-gray-300 border border-gray-100'
-                      }`}>
-                        {displayState.gates.ddGate ? '✓' : '—'}
-                      </div>
-                      <span className={`text-xs font-bold ${displayState.gates.ddGate ? 'text-app-pink' : 'text-app-subtext'}`}>가격 하락</span>
-                    </div>
-                  </div>
-                )}
-
+            <Card title={`${settings.symbol} 낙폭 매수 기준`}>
+              <p className="text-sm text-app-subtext">{heroConfig.title} · {heroConfig.sub}</p>
                 {/* 자산 + 기간 선택 */}
-                {!isLoading && (
-                  <div className="mt-10 pt-8 border-t border-gray-200/50 flex flex-wrap justify-center items-center gap-2">
+                {dataSource!=='LOADING' && (
+                  <div className="my-3 flex flex-wrap justify-center items-center gap-2">
                     <select
                       value={settings.symbol}
                       onChange={handleAssetChange}
@@ -2094,9 +2070,8 @@
                     })()}
                   </div>
                 )}
-              </div>
-            </div>
-
+<div className="mt-4 grid grid-cols-2 gap-3"><div className="rounded-xl bg-blue-50 p-3"><p className="text-xs text-app-subtext">현재 최고점 대비 낙폭</p><strong className="text-2xl text-app-blue">{primary?formatPct1(primary.metrics.currentDd):'—'}</strong></div><label className="rounded-xl bg-pink-50 p-3 text-xs">{settings.symbol} 추가매수 기준<select aria-label="자산별 추가매수 기준" className="mt-1 block w-full rounded-lg border bg-white p-2 font-bold" value={settings.targetDdPct} onChange={e=>setSettings(p=>({...p,targetDdPct:Number(e.target.value)}))}>{FIXED_DD_STEPS.map(n=><option key={n} value={n}>{n}%</option>)}</select></label></div>
+            </Card>
             {/* 경고 메시지 */}
             {fetchStatus.error && (
               <div className="bg-app-yellowLight text-yellow-700 p-4 rounded-2xl text-sm font-semibold border border-yellow-200">
@@ -2104,7 +2079,7 @@
               </div>
             )}
 
-            <LiveQuotePanel symbol={settings.symbol} usdEngine={appState.usdEngine} krwEngine={appState.krwEngine} dataSource={dataSource} onQuote={setScreenQuote} rawData={rawData} />
+
 
             {/* ============ 2단계: 왜 이런 판단인가요? ============ */}
             <Accordion
@@ -2135,9 +2110,10 @@
                   </Badge>
                 </div>
               </div>
-              <IndicatorPanel model={indicatorState.model} snapshot={indicatorState.snapshot} source={dataSource} confirmedMomentum={indicatorState.confirmedMomentum} startDate={settings.startDate} endDate={settings.endDate} />
+
             </Accordion>
 
+            <LiveQuotePanel endpoint={quoteEndpoint} symbol={settings.symbol} usdEngine={appState.usdEngine} krwEngine={appState.krwEngine} dataSource={dataSource} onQuote={setScreenQuote} rawData={rawData} />
             {/* ============ 3단계: 현재 시장은 어떤가요? ============ */}
             <Accordion
               title="가격 및 낙폭 차트"
@@ -2300,28 +2276,64 @@
         );
       }
 
-      function renderDetail() {
-        if (!appState.usdEngine && !appState.krwEngine) {
-          return <Card><p className="py-8 text-sm text-app-subtext">{appState.configWarning || '선택 기간에 유효한 데이터가 없습니다.'}</p></Card>;
-        }
-        return <div className="space-y-6 pb-10 animate-fade-in">
-          {dataSource === 'SAMPLE' && <p className="rounded-xl bg-red-50 p-3 text-sm font-bold text-red-600">샘플 데이터입니다. 실제 과거 투자 기록이 아닙니다.</p>}
-          <HistoryMethodNote />
-          {['USD', 'KRW'].map(mode => {
-            const engine = mode === 'USD' ? appState.usdEngine : appState.krwEngine;
-            return engine ? <Card key={mode} title={mode === 'USD' ? '달러 기준 낙폭별 회복 통계' : '원화 기준 낙폭별 회복 통계'}>
-              <p className="mb-3 text-xs text-app-subtext">{engine.timeSeries[0].date} ~ {engine.timeSeries[engine.timeSeries.length - 1].date}</p>
-              <HistoryThresholdTable engine={engine} />
-            </Card> : null;
-          })}
-        </div>;
-      }
+      function renderDetail(){return <div><Card title="보조지표 분석"><p className="text-xs text-app-subtext">{settings.symbol} · {settings.startDate} ~ {settings.endDate}</p>                {/* 자산 + 기간 선택 */}
+                {dataSource!=='LOADING' && (
+                  <div className="my-3 flex flex-wrap justify-center items-center gap-2">
+                    <select
+                      value={settings.symbol}
+                      onChange={handleAssetChange}
+                      className="px-4 py-2.5 bg-white border border-gray-200 rounded-xl text-sm font-bold text-app-text outline-none cursor-pointer shadow-sm hover:border-gray-300"
+                    >
+                      {assetsList.filter((a) => a.enabled !== false).map((a) => (
+                        <option key={a.symbol} value={a.symbol}>{a.symbol}</option>
+                      ))}
+                    </select>
+
+                    {(() => {
+                      const dataFirstDate = meta.usdFirstDate || null;
+                      const today = new Date();
+                      const todayStr = today.toISOString().slice(0, 10);
+                      const periods = [
+                        { label: '1년', years: 1 },
+                        { label: '3년', years: 3 },
+                        { label: '5년', years: 5 },
+                        { label: '10년', years: 10 },
+                        { label: '최대', years: null },
+                      ];
+                      function getPeriodStart(years) {
+                        if (years === null) return dataFirstDate || '1993-01-01';
+                        const d = new Date(today);
+                        d.setFullYear(d.getFullYear() - years);
+                        const s = d.toISOString().slice(0, 10);
+                        if (dataFirstDate && s < dataFirstDate) return dataFirstDate;
+                        return s;
+                      }
+                      function isActive(years) {
+                        const start = getPeriodStart(years);
+                        return settings.startDate === start && settings.endDate >= todayStr.slice(0, 7);
+                      }
+                      return periods.map(({ label, years }) => (
+                        <button
+                          key={label}
+                          onClick={() => setSettings(prev => ({ ...prev, startDate: getPeriodStart(years), endDate: '2099-12-31' }))}
+                          className={`px-4 py-2.5 rounded-xl text-sm font-bold transition-all ${
+                            isActive(years) ? 'bg-app-text text-white shadow-sm' : 'bg-white text-app-subtext border border-gray-200 hover:bg-gray-50'
+                          }`}
+                        >
+                          {label}
+                        </button>
+                      ));
+                    })()}
+                  </div>
+                )}
+              <IndicatorPanel model={indicatorState.model} snapshot={indicatorState.snapshot} source={dataSource} confirmedMomentum={indicatorState.confirmedMomentum} startDate={settings.startDate} endDate={settings.endDate} /></Card></div>;}
 
       function renderSettings() {
         return (
           <div className="space-y-6 animate-fade-in pb-10">
-            <Card title="프리셋 (Presets)">
-              <p className="text-sm text-app-subtext mb-4">초보자를 위한 추천 설정값을 한 번에 적용할 수 있습니다.</p>
+            <QuoteConnectionSettings endpoint={quoteEndpoint} setEndpoint={setQuoteEndpoint} />
+            <Card title={`${settings.symbol} 프리셋`}>
+              <p className="text-sm text-app-subtext mb-4">선택한 자산의 낙폭 기준에만 적용합니다. 다른 자산의 낙폭 기준은 유지합니다.</p>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                 {[
                   { label: '보수형 (-30%)', preset: { targetDdPct: -30, fearGreedIndex: 'Extreme Fear' } },
@@ -2359,7 +2371,7 @@
                         <option key={pct} value={pct}>{pct}%</option>
                       ))}
                     </select>
-                    <p className="mt-2 text-xs text-app-subtext">역대 최고가 대비 이 낙폭에서 추가매수를 고려합니다.</p>
+                    <p className="mt-2 text-xs text-app-subtext">선택한 자산에만 저장됩니다. 차트의 기준선 조정에도 같은 설정을 적용합니다.</p>
                   </div>
 
                   <div>
@@ -2580,7 +2592,7 @@
                   '분석할 자산(예: SPY)과 기간을 선택합니다.',
                   '추가매수 기준 낙폭을 설정합니다. 예: -20% = 최고점 대비 20% 빠졌을 때.',
                   '대시보드에서 현재 낙폭과 기준선을 비교합니다.',
-                  '"회복 통계" 탭에서 다양한 기준의 과거 승률을 확인합니다.',
+                  '대시보드의 "과거엔 어땠나요?"에서 과거 회복 기록을 확인합니다.',
                   '생활 조건과 시장 조건을 함께 보고 실행 여부를 판단합니다.'
                 ].map((step, i) => (
                   <li key={i} className="flex items-center">
@@ -2611,7 +2623,7 @@
             <nav className="flex space-x-2 mb-6 bg-white p-1.5 rounded-2xl border border-app-border shadow-sm">
               {[
                 { id: 'dashboard', label: '대시보드' },
-                { id: 'detail', label: '회복 통계' },
+                { id: 'detail', label: '보조지표' },
                 { id: 'settings', label: '설정' },
                 { id: 'guide', label: '가이드' }
               ].map((tab) => (
@@ -2628,7 +2640,7 @@
             </nav>
 
             <main>
-              {activeTab === 'dashboard' && renderDashboard()}
+              <div hidden={activeTab!=='dashboard'}>{renderDashboard()}</div>
               {activeTab === 'detail' && renderDetail()}
               {activeTab === 'settings' && renderSettings()}
               {activeTab === 'guide' && renderGuide()}
