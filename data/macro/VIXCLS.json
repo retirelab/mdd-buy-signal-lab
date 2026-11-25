@@ -3,7 +3,7 @@
   "sourceUrl": "https://fred.stlouisfed.org/graph/fredgraph.csv?id=VIXCLS",
   "units": "Index",
   "frequency": "Daily (close)",
-  "updatedAt": "2026-11-25T08:45:58+00:00",
+  "updatedAt": "2026-11-25T23:12:11+00:00",
   "origin": "FRED CSV (CBOE VIX close); pre-FRED rows from CBOE backfill",
   "observations": [
     {
@@ -38505,6 +38505,10 @@
     {
       "date": "2026-11-23",
       "value": 26.62
+    },
+    {
+      "date": "2026-11-24",
+      "value": 26.36
     }
   ]
 }
