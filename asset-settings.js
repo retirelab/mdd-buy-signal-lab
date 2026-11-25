@@ -1,7 +1,7 @@
 (function(root){
- // 2026-11-25 operator decision: SPY -20%, QQQ -20%, KODEX 200 -30% (first-tranche thresholds).
- const DEFAULT_TARGETS=Object.freeze({SPY:-20,QQQ:-20,'069500':-30});
- const PRESET_VERSION='2026-11-25';
+ // 2026-11-25 operator decisions: SPY -20%, QQQ -20%, KODEX 200 -30%, GLD -20% (first-tranche thresholds).
+ const DEFAULT_TARGETS=Object.freeze({SPY:-20,QQQ:-20,'069500':-30,GLD:-20});
+ const PRESET_VERSION='2026-11-25b';
  const valid=n=>Number.isFinite(Number(n))&&Number(n)<=-1&&Number(n)>=-100;
  const fallback=sym=>Object.hasOwn(DEFAULT_TARGETS,sym)?DEFAULT_TARGETS[sym]:-20;
  function normalize(s){

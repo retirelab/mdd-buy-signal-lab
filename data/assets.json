@@ -35,11 +35,12 @@
     "symbol": "HYG",
     "name": "iShares iBoxx $ High Yield Corporate Bond ETF",
     "assetType": "ETF",
-    "enabled": true,
+    "enabled": false,
     "defaultTargetRecovery": 0.8,
     "defaultBandStep": 0.05,
     "order": 4,
-    "category": "Credit"
+    "category": "Credit",
+    "hiddenNote": "2026-11-25: hidden in the app (price-only drawdown does not fit this asset); price data is still collected"
   },
   {
     "symbol": "GLD",
@@ -55,10 +56,11 @@
     "symbol": "TLT",
     "name": "iShares 20+ Year Treasury Bond ETF",
     "assetType": "ETF",
-    "enabled": true,
+    "enabled": false,
     "defaultTargetRecovery": 0.8,
     "defaultBandStep": 0.05,
     "order": 6,
-    "category": "Long Treasury"
+    "category": "Long Treasury",
+    "hiddenNote": "2026-11-25: hidden in the app (price-only drawdown does not fit this asset); price data is still collected"
   }
 ]

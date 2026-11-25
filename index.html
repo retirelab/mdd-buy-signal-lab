@@ -86,11 +86,11 @@
   <script crossorigin src="https://unpkg.com/@babel/standalone@7.26.7/babel.min.js"></script>
 
   <script src="https://unpkg.com/lightweight-charts@5.1.0/dist/lightweight-charts.standalone.production.js"></script>
-  <script src="./unemployment-tools.js?v=20261125.3"></script>
-  <script src="./vix-tools.js?v=20261125.3"></script>
-  <script src="./domestic-tools.js?v=20261125.3"></script>
-  <script src="./asset-settings.js?v=20261125.3"></script>
-  <script src="./chart-terminal.js?v=20261125.3"></script>
+  <script src="./unemployment-tools.js?v=20261125.4"></script>
+  <script src="./vix-tools.js?v=20261125.4"></script>
+  <script src="./domestic-tools.js?v=20261125.4"></script>
+  <script src="./asset-settings.js?v=20261125.4"></script>
+  <script src="./chart-terminal.js?v=20261125.4"></script>
 
   <style>
     body {
@@ -264,9 +264,9 @@
       { symbol: 'SPY', name: 'SPDR S&P 500 ETF Trust', assetType: 'ETF', enabled: true, defaultTargetMddRatio: 0.80, defaultBandStep: 0.05 },
       { symbol: 'QQQ', name: 'Invesco QQQ Trust', assetType: 'ETF', enabled: true, defaultTargetMddRatio: 0.80, defaultBandStep: 0.05 },
       { symbol:'069500',name:'KODEX 200',currency:'KRW',assetType:'ETF',enabled:true },
-      { symbol: 'HYG', name: 'iShares iBoxx $ High Yield Corporate Bond ETF', assetType: 'ETF', enabled: true, defaultTargetMddRatio: 0.80, defaultBandStep: 0.05 },
+      { symbol: 'HYG', name: 'iShares iBoxx $ High Yield Corporate Bond ETF', assetType: 'ETF', enabled: false, defaultTargetMddRatio: 0.80, defaultBandStep: 0.05 },
       { symbol: 'GLD', name: 'SPDR Gold Shares', assetType: 'ETF', enabled: true, defaultTargetMddRatio: 0.80, defaultBandStep: 0.05 },
-      { symbol: 'TLT', name: 'iShares 20+ Year Treasury Bond ETF', assetType: 'ETF', enabled: true, defaultTargetMddRatio: 0.80, defaultBandStep: 0.05 }
+      { symbol: 'TLT', name: 'iShares 20+ Year Treasury Bond ETF', assetType: 'ETF', enabled: false, defaultTargetMddRatio: 0.80, defaultBandStep: 0.05 }
     ];
 
     // -------------------------------------
@@ -1738,7 +1738,7 @@
       useEffect(() => {
         let isCancelled = false;
 
-        fetch('./data/assets.json?v=20261125.3', { cache: 'no-cache' })
+        fetch('./data/assets.json?v=20261125.4', { cache: 'no-cache' })
           .then((res) => (res.ok ? res.json() : null))
           .then((data) => {
             if (isCancelled) return;
@@ -1953,6 +1953,18 @@
           ...(name === 'currencyMode' && value !== 'BOTH' ? { primarySignalMode: value } : {})
         }));
       }
+
+      // Hidden assets (enabled:false) stay collected but are not selectable; move a saved hidden choice to the first visible asset.
+      useEffect(() => {
+        const visible = assetsList.filter((a) => a.enabled !== false).map((a) => a.symbol);
+        if (visible.length && !visible.includes(settings.symbol)) {
+          const symbol = visible[0];
+          setSettings((prev) => ({ ...prev, symbol }));
+          setChartUsd(!DomesticTools.isDomestic(symbol)); setChartKrw(true);
+          setDataSource('LOADING');
+          setReloadToken((prev) => prev + 1);
+        }
+      }, [assetsList, settings.symbol]);
 
       function handleAssetChange(e) {
         const symbol = e.target.value;
