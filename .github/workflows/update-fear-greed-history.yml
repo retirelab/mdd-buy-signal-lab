@@ -1,0 +1,38 @@
+name: Update Fear & Greed history (US trading date)
+on:
+  schedule:
+    - cron: '45 1 * * 2-6' # 10:45 Asia/Seoul (Tue–Sat), after the price update
+  workflow_dispatch:
+    inputs:
+      archive:
+        description: 'Re-merge the community archive (2011~) as well'
+        type: boolean
+        default: false
+  push:
+    paths:
+      - scripts/update_fear_greed_history.py
+      - .github/workflows/update-fear-greed-history.yml
+concurrency:
+  group: update-price-data
+  cancel-in-progress: false
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Merge CNN history (and optional archive)
+        run: python scripts/update_fear_greed_history.py ${{ inputs.archive && '--archive' || '' }}
+      - name: Commit data and status
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/history/
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m "Update Fear & Greed history"
+          git pull --rebase origin "${{ github.ref_name }}"
+          git push
