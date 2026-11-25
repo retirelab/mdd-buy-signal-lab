@@ -19,6 +19,7 @@
   }
   function formatValue(value,kind){
     if(!Number.isFinite(value))return '—';
+    if(kind==='krw')return value.toLocaleString('ko-KR',{maximumFractionDigits:0})+'원';
     if(kind==='percent')return (value*100).toFixed(2)+'%';
     return (kind==='usd'?'$':'')+value.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
   }

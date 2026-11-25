@@ -1,0 +1,33 @@
+name: Update KODEX 200 KRW prices
+on:
+  schedule:
+    - cron: '15 9 * * 1-5' # 18:15 Asia/Seoul, closed Korean sessions only
+  workflow_dispatch:
+  push:
+    paths:
+      - scripts/update_kodex.py
+      - .github/workflows/update-kodex.yml
+concurrency:
+  group: update-price-data
+  cancel-in-progress: false
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Collect KODEX 200 without API keys
+        run: python scripts/update_kodex.py
+      - name: Commit data and status
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/prices/069500.json data/prices/069500-meta.json
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m "Update KODEX 200 Korean closing history"
+          git pull --rebase origin "${{ github.ref_name }}"
+          git push

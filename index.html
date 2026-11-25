@@ -86,9 +86,10 @@
   <script crossorigin src="https://unpkg.com/@babel/standalone@7.26.7/babel.min.js"></script>
 
   <script src="https://unpkg.com/lightweight-charts@5.1.0/dist/lightweight-charts.standalone.production.js"></script>
-  <script src="./unemployment-tools.js?v=20261113.2"></script>
-  <script src="./asset-settings.js?v=20261113.2"></script>
-  <script src="./chart-terminal.js?v=20261113.2"></script>
+  <script src="./unemployment-tools.js?v=20261125.1"></script>
+  <script src="./domestic-tools.js?v=20261125.1"></script>
+  <script src="./asset-settings.js?v=20261125.1"></script>
+  <script src="./chart-terminal.js?v=20261125.1"></script>
 
   <style>
     body {
@@ -257,9 +258,11 @@
     // 스프레드시트 방식: ATH 대비 고정 낙폭 구간 (-5% 단위)
     const FIXED_DD_STEPS = [-5,-10,-15,-20,-25,-30,-35,-40,-45,-50,-55,-60,-65,-70,-75,-80,-85,-90,-95,-100];
 
+    const assetLabel=s=>s==='069500'?'KODEX 200':s;
     const FALLBACK_ASSETS = [
       { symbol: 'SPY', name: 'SPDR S&P 500 ETF Trust', assetType: 'ETF', enabled: true, defaultTargetMddRatio: 0.80, defaultBandStep: 0.05 },
       { symbol: 'QQQ', name: 'Invesco QQQ Trust', assetType: 'ETF', enabled: true, defaultTargetMddRatio: 0.80, defaultBandStep: 0.05 },
+      { symbol:'069500',name:'KODEX 200',currency:'KRW',assetType:'ETF',enabled:true },
       { symbol: 'HYG', name: 'iShares iBoxx $ High Yield Corporate Bond ETF', assetType: 'ETF', enabled: true, defaultTargetMddRatio: 0.80, defaultBandStep: 0.05 },
       { symbol: 'GLD', name: 'SPDR Gold Shares', assetType: 'ETF', enabled: true, defaultTargetMddRatio: 0.80, defaultBandStep: 0.05 },
       { symbol: 'TLT', name: 'iShares 20+ Year Treasury Bond ETF', assetType: 'ETF', enabled: true, defaultTargetMddRatio: 0.80, defaultBandStep: 0.05 }
@@ -685,7 +688,7 @@
     // -------------------------------------
     // UI Components
     // -------------------------------------
-    const HISTORY_VERSION = '2026.11.13.2';
+    const HISTORY_VERSION = '2026.11.25.1';
 
     function HistoryMethodNote() {
       return <div className="rounded-xl bg-amber-50 p-4 text-xs leading-relaxed text-amber-800 space-y-2">
@@ -832,7 +835,7 @@
 
     const TerminalPlot = ChartTerminal.Plot;
 
-    function MomentumPanel({ trend, confirmed, snapshot, startDate, endDate }) {
+    function MomentumPanel({ trend, confirmed, snapshot, startDate, endDate, currency="USD" }) {
       const [selectedDate,setSelectedDate] = useState(null);
       const [crossSelectionKey,setCrossSelectionKey] = useState(0);
       const momentumChartRef=useRef(null);
@@ -849,7 +852,7 @@
       function selectCross(row){setSelectedDate(row.date);setCrossSelectionKey(key=>key+1);momentumChartRef.current?.scrollIntoView({behavior:"smooth",block:"start"});}
       const last = rows[rows.length-1];
       const selected = rows.find(r=>r.date===selectedDate) || last;
-      const money = n => n === null ? '데이터 부족' : '$'+n.toFixed(2);
+      const money = n => n === null ? '데이터 부족' : currency==='KRW'?formatKrw(n):'$'+n.toFixed(2);
       const name = type => type === 'golden' ? '골든크로스' : '데드크로스';
       const status = {above:'60일선이 200일선 위',below:'60일선이 200일선 아래',equal:'두 이동평균선이 같은 수준',insufficient:'200거래일 데이터 필요'}[trend.position];
       const gapText = trend.gap===null ? '' : Math.abs(trend.gap)>1e-12 && Math.abs(trend.gap*100)<.01 ? '0.01% 미만' : `${trend.gap>=0?'+':''}${(trend.gap*100).toFixed(2)}%`;
@@ -883,7 +886,7 @@
         setSelectedDate(row.date);
       }
       return <section data-testid="momentum-panel" className="mt-4 rounded-2xl border border-gray-100 bg-gray-50 p-4">
-        <div className="flex flex-wrap justify-between items-center gap-2"><h4 className="text-sm font-bold">추세추종 모멘텀 · 60일 / 200일</h4><span className="text-[11px] text-app-subtext">USD · 단순이동평균</span></div>
+        <div className="flex flex-wrap justify-between items-center gap-2"><h4 className="text-sm font-bold">추세추종 모멘텀 · 60일 / 200일</h4><span className="text-[11px] text-app-subtext">{currency} · 단순이동평균</span></div>
         <p className={`mt-3 text-lg font-bold ${trend.position==='above'?'text-app-blue':trend.position==='below'?'text-app-pink':'text-app-text'}`}>{status}</p>
         <details className="mt-2 text-xs"><summary className="cursor-pointer text-app-subtext">추세 수치·최근 교차</summary>
         <p className="mt-1 text-xs text-app-subtext">{snapshot?'조회 시세 기준 · 잠정':'종가 기록 기준'} · {trend.date}{trend.gap!==null ? ` · 두 선의 간격 ${gapText}` : ''}</p>
@@ -899,7 +902,7 @@
         <ChartViewer title="60일·200일 이동평균 차트">{expanded=><div>
         <div className="hidden mt-4 flex flex-wrap gap-x-4 gap-y-1 text-[11px] font-semibold"><span className="text-app-blue">━ 가격</span><span className="text-amber-700">━ 60일선</span><span className="text-purple-700">┄ 200일선</span><span className="text-app-subtext">선택 기간 · {rows.length.toLocaleString()}거래일</span></div>
         <p className="hidden" data-testid="momentum-range">선택 기간 {rows[0].date} ~ {last.date}</p>
-        <div ref={momentumChartRef} style={{scrollMarginTop:"72px"}}><TerminalPlot series={terminalSeries} markers={terminalMarkers} defaultShowMarkers={true} selectionKey={crossSelectionKey} selectedDate={selected.date} onSelectDate={setSelectedDate} kind="usd" expanded={expanded} testId="terminal-momentum" label="이동평균 금융 차트" height={expanded?'max(320px, calc(100dvh - 300px))':undefined} fallback={<div className="relative mt-2 h-48 sm:h-64 w-full rounded-lg bg-white" style={expanded?{height:"max(260px, calc(100dvh - 260px))"}:undefined}><svg data-testid="momentum-chart" viewBox={`0 0 ${d.width} ${d.height}`} className="h-full w-full" preserveAspectRatio="none" style={{touchAction:'pan-y'}} role="img" aria-label="달러 가격과 60일·200일 이동평균선. 차트 아래 날짜에서 일별 수치를 조회할 수 있습니다."
+        <div ref={momentumChartRef} style={{scrollMarginTop:"72px"}}><TerminalPlot series={terminalSeries} markers={terminalMarkers} defaultShowMarkers={true} selectionKey={crossSelectionKey} selectedDate={selected.date} onSelectDate={setSelectedDate} kind={currency==='KRW'?'krw':'usd'} expanded={expanded} testId="terminal-momentum" label="이동평균 금융 차트" height={expanded?'max(320px, calc(100dvh - 300px))':undefined} fallback={<div className="relative mt-2 h-48 sm:h-64 w-full rounded-lg bg-white" style={expanded?{height:"max(260px, calc(100dvh - 260px))"}:undefined}><svg data-testid="momentum-chart" viewBox={`0 0 ${d.width} ${d.height}`} className="h-full w-full" preserveAspectRatio="none" style={{touchAction:'pan-y'}} role="img" aria-label="가격과 60일·200일 이동평균선. 차트 아래 날짜에서 일별 수치를 조회할 수 있습니다."
           onPointerDown={e=>{if(e.button===0)gestureRef.current={x:e.clientX,y:e.clientY,horizontal:false};}}
           onPointerMove={e=>{const g=gestureRef.current;if(!g)return;const dx=Math.abs(e.clientX-g.x),dy=Math.abs(e.clientY-g.y);if(!g.horizontal&&dy>8&&dy>dx){gestureRef.current=null;return;}if(dx>8&&dx>dy){g.horizontal=true;e.currentTarget.setPointerCapture(e.pointerId);}if(g.horizontal)selectAt(e.clientX,e.currentTarget);}}
           onPointerUp={e=>{const g=gestureRef.current;if(g&&(g.horizontal||Math.abs(e.clientY-g.y)<8))selectAt(e.clientX,e.currentTarget);gestureRef.current=null;}} onPointerCancel={()=>{gestureRef.current=null;}}>
@@ -920,7 +923,7 @@
           <p className="mt-2 text-[11px] text-app-subtext">선택 기간 내 교차 · 최신순. 행을 누르면 차트에서 확인합니다. 표는 좌우로 밀어 볼 수 있습니다.</p>
           {crossRows.length ? <div className="mt-2 max-h-72 overflow-auto rounded-lg border border-gray-100" role="region" aria-label="이동평균 교차 이력표" tabIndex="0">
             <table className="w-full min-w-[540px] text-left text-[11px] tabular-nums">
-              <thead className="bg-gray-50 text-app-subtext"><tr>{['종류','날짜','가격(USD)','60일선','200일선','기준'].map(label=><th key={label} scope="col" className="whitespace-nowrap px-3 py-2 font-semibold">{label}</th>)}</tr></thead>
+              <thead className="bg-gray-50 text-app-subtext"><tr>{['종류','날짜',`가격(${currency})`,'60일선','200일선','기준'].map(label=><th key={label} scope="col" className="whitespace-nowrap px-3 py-2 font-semibold">{label}</th>)}</tr></thead>
               <tbody>{crossRows.map(row=><tr key={row.date} data-cross-date={row.date} onClick={()=>selectCross(row)} className={`cursor-pointer border-t border-gray-100 hover:bg-blue-50 ${selectedDate===row.date?'bg-blue-50':''}`}>
                 <td className={`whitespace-nowrap px-3 py-3 font-semibold ${row.cross==='golden'?'text-amber-700':'text-rose-600'}`}>● {name(row.cross)}</td>
                 <td className="px-3 py-3"><button type="button" onClick={e=>{e.stopPropagation();selectCross(row);}} aria-label={`${row.date} ${name(row.cross)} 차트에서 보기`} className="whitespace-nowrap rounded text-app-blue underline underline-offset-2 focus-visible:outline focus-visible:outline-2">{row.date}</button></td>
@@ -966,23 +969,24 @@
       </section>;
     }
 
-    function IndicatorPanel({ model, snapshot, source, confirmedMomentum, startDate, endDate }) {
+    function IndicatorPanel({ model, snapshot, source, confirmedMomentum, startDate, endDate, currency="USD" }) {
       if (!model) return <p className="mt-4 text-xs text-app-subtext">보조지표를 계산할 가격 데이터가 없습니다.</p>;
+      const priceMoney=n=>currency==='KRW'?formatKrw(n):'$'+n.toFixed(2);
       const fixed = n => n === null ? '데이터 부족' : n.toFixed(1);
       const signed = n => n === null ? '데이터 부족' : `${n >= 0 ? '+' : ''}${(n*100).toFixed(1)}%`;
       const fx = model.fx;
       const cards = [
         {title:'RSI(14)', value:fixed(model.rsi), note:model.rsi === null ? '최소 15거래일의 가격이 필요합니다.' : model.rsi < 30 ? '30 미만 · 최근 하락 압력이 큰 구간' : model.rsi > 70 ? '70 초과 · 최근 상승 압력이 큰 구간' : '30~70 · 중간 구간', detail:'14거래일 Wilder 방식 · 0~100'},
-        {title:'60일 이동평균 대비', value:model.momentum.sma60===null?'데이터 부족':signed(model.momentum.rows.at(-1).price/model.momentum.sma60-1), note:model.momentum.sma60===null?'최소 60거래일의 가격이 필요합니다.':`60일 평균 $${model.momentum.sma60.toFixed(2)}`, detail:'최근 60거래일 단순이동평균 기준'},
-        {title:'200일 이동평균 대비', value:signed(model.distance), note:model.sma === null ? `현재 ${model.count}거래일 · 200거래일 필요` : `200일 평균 $${model.sma.toFixed(2)} · 평균보다 ${model.distance >= 0 ? '위' : '아래'}`, detail:'최근 200거래일 단순이동평균 기준'},
+        {title:'60일 이동평균 대비', value:model.momentum.sma60===null?'데이터 부족':signed(model.momentum.rows.at(-1).price/model.momentum.sma60-1), note:model.momentum.sma60===null?'최소 60거래일의 가격이 필요합니다.':`60일 평균 ${priceMoney(model.momentum.sma60)}`, detail:'최근 60거래일 단순이동평균 기준'},
+        {title:'200일 이동평균 대비', value:signed(model.distance), note:model.sma === null ? `현재 ${model.count}거래일 · 200거래일 필요` : `200일 평균 ${priceMoney(model.sma)} · 평균보다 ${model.distance >= 0 ? '위' : '아래'}`, detail:'최근 200거래일 단순이동평균 기준'},
         {title:'20일 변동성 위치', value:model.volPercentile === null ? '데이터 부족' : `${fixed(model.volPercentile)}백분위`, note:model.volatility === null ? '최소 21거래일의 가격이 필요합니다.' : `연환산 변동성 ${(model.volatility*100).toFixed(1)}% · ${model.volPercentile >= 80 ? '평소보다 큰 흔들림' : model.volPercentile <= 20 ? '평소보다 작은 흔들림' : '중간 수준의 흔들림'}`, detail:`${model.fullFiveYears ? '최근 5년' : '5년 미충족'} · 비교 ${model.volCount}거래일`},
-        {title:'원·달러 환율 1년 내 위치', value:fx ? `${fixed(fx.position)}%` : '데이터 없음', note:fx ? `${fx.rate.toFixed(2)}원 · 낮을수록 달러 매입 부담 감소` : '공식 환율 기록을 불러오면 표시합니다.', detail:fx ? `${fx.fullYear ? '최근 1년' : '1년 미충족'} 저점 ${fx.low.toFixed(2)} ~ 고점 ${fx.high.toFixed(2)}원` : '환율 범위 내 위치 · 저점 0%, 고점 100%'}
+        {title:'원·달러 환율 1년 내 위치', value:fx ? `${fixed(fx.position)}%` : '데이터 없음', note:fx ? `${fx.rate.toFixed(2)}원 · ${currency==='KRW'?'국내 ETF 가격에는 환산 미적용':'낮을수록 달러 매입 부담 감소'}` : '공식 환율 기록을 불러오면 표시합니다.', detail:fx ? `${fx.fullYear ? '최근 1년' : '1년 미충족'} 저점 ${fx.low.toFixed(2)} ~ 고점 ${fx.high.toFixed(2)}원` : '환율 범위 내 위치 · 저점 0%, 고점 100%'}
       ];
       return <div className="mt-5 border-t border-gray-100 pt-4">
-        <div className="flex flex-wrap items-center justify-between gap-2 mb-2"><h3 className="text-sm font-bold">투자 판단 보조지표</h3><span className="text-xs text-app-subtext">가격 지표: USD 기준</span></div>
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-2"><h3 className="text-sm font-bold">투자 판단 보조지표</h3><span className="text-xs text-app-subtext">가격 지표: {currency} 기준</span></div>
         <p className="mb-3 text-xs text-app-subtext">{source === 'SAMPLE' ? '샘플 데이터' : source === 'IMPORTED' ? '가져온 데이터' : snapshot ? '조회 시세로 잠정 계산' : '확정 종가 기준'} · 가격 기준일 {model.date}</p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">{cards.map(card=><div key={card.title} className="min-w-0 rounded-2xl border border-gray-100 bg-gray-50 p-4"><h4 className="text-xs font-semibold text-app-text">{card.title}</h4><p className="my-2 text-2xl font-bold text-app-text">{card.value}</p><p className="text-xs leading-relaxed text-app-text">{card.note}</p><p className="mt-2 text-[11px] leading-relaxed text-app-subtext">{card.detail}</p></div>)}</div>
-        <MomentumPanel trend={model.momentum} confirmed={confirmedMomentum} snapshot={snapshot} startDate={startDate} endDate={endDate} />
+        <MomentumPanel currency={currency} trend={model.momentum} confirmed={confirmedMomentum} snapshot={snapshot} startDate={startDate} endDate={endDate} />
         {fx && <p className="mt-3 text-[11px] leading-relaxed text-app-subtext">환율 기준일 {fx.date}{fx.live ? ` · 조회 환율${fx.readAt ? ' · 조회 시각 '+new Date(fx.readAt).toLocaleString('ko-KR',{timeZone:'Asia/Seoul'})+' KST' : ''}` : ' · 저장된 일별 환율'} · 주가와 환율의 관측 시점은 다를 수 있습니다.</p>}
         <details className="mt-3 text-xs text-app-subtext"><summary className="cursor-pointer">지표 계산과 해석</summary><p className="mt-2 leading-relaxed">RSI는 최근 상승·하락의 상대 강도입니다. 변동성은 20개 일별 로그수익률의 표본 표준편차를 연환산(252거래일)하며, 백분위가 높을수록 비교 기간보다 흔들림이 큽니다. 환율 위치는 최근 1년 저점과 고점 사이의 위치이며 백분위와 다릅니다. 계산에는 선택한 차트 시작일 이전의 데이터도 사용합니다. 조회 시세를 반영한 값은 종가 확정 전 달라질 수 있습니다. 보조지표는 기존 2개 매수 조건의 통과 수에 포함되지 않습니다.</p></details>
       </div>;
@@ -1012,7 +1016,7 @@
       async function refresh() {
         const id = ++requestNumber.current;
         currentRequest.current?.cancel();
-        if (!endpoint) { setBusy(false); return; }
+        if (!endpoint || DomesticTools.isDomestic(symbol)) { setBusy(false); return; }
         setBusy(true); setError('');
         const request = QuoteTools.request(endpoint);
         currentRequest.current = request;
@@ -1032,6 +1036,7 @@
       const applied = quote && dataSource === 'FETCHED' ? QuoteTools.applySnapshot(usdEngine, quote, 'USD', rawData, symbol) : null;
       const comparison = applied?.quoteInfo ? {dd:applied.metrics.currentDd, reached:applied.target.isTriggered, targetPrice:applied.target.price, remaining:applied.target.price / quote.price - 1} : null;
       const stamp = value => value ? new Date(value).toLocaleString('ko-KR', {timeZone:'Asia/Seoul',hour12:false}) + ' KST' : '확인 불가';
+      if(DomesticTools.isDomestic(symbol))return <Card className="compact-quote" title="KODEX 200 · 최근 종가"><p className="text-xl font-bold text-app-green">{dataSource==='FETCHED'&&rawData.length?formatKrw(rawData.at(-1).closeKrw):'종가 자료 확인 중'}</p><p className="mt-2 text-xs text-app-subtext">{dataSource==='FETCHED'?rawData.at(-1)?.date:''} · 원화 · 한국 장 마감 후 자동 수집</p><p className="mt-2 text-xs text-app-subtext">네이버 차트 가격 기준 · 과거 가격은 사후 조정될 수 있습니다. 분배금 재투자 수익률과 다릅니다. 당일 장중 조회 시세는 지원하지 않습니다.</p></Card>;
       return <Card className="compact-quote" title={`${symbol} 조회 시세`} titleRight={<button type="button" disabled={busy || !endpoint} onClick={refresh} className="rounded-xl bg-app-blue px-3 py-2 text-xs font-bold text-white disabled:opacity-40">{busy ? '조회 중…' : '현재가 새로고침'}</button>}>
         <div className={endpoint ? "space-y-3" : "space-y-3"} aria-live="polite">
           {!endpoint && <p className="text-sm text-app-subtext">Google 시세 연결이 필요합니다. 설정 탭의 ‘시세 연결 설정’에서 웹앱 주소를 등록하면 앱 진입 시 자동 조회합니다.</p>}
@@ -1677,7 +1682,8 @@
       const verifyRef = useRef(null);
       const detailTableRef = useRef(null);
       const [storedSettings,setStoredSettings]=useLocalStorage('mdd_settings_fixed_v1',DEFAULT_SETTINGS);
-      const settings=useMemo(()=>AssetSettings.normalize(storedSettings),[storedSettings]);
+      const settings=useMemo(()=>{const s=AssetSettings.normalize(storedSettings);return DomesticTools.isDomestic(s.symbol)?{...s,currencyMode:'KRW',primarySignalMode:'KRW'}:s;},[storedSettings]);
+      const domestic=DomesticTools.isDomestic(settings.symbol);
       function setSettings(change){setStoredSettings(prev=>AssetSettings.update(prev,change));}
       const [quoteEndpoint,setQuoteEndpoint]=useLocalStorage('retirelab_google_quote_endpoint_v1','');
       const [reloadToken, setReloadToken] = useState(0);
@@ -1705,7 +1711,7 @@
           .then((data) => {
             if (isCancelled) return;
             if (Array.isArray(data) && data.length > 0) {
-              setAssetsList(data);
+              setAssetsList(data.slice().sort((a,b)=>(a.order||99)-(b.order||99)));
               setFetchStatus((prev) => ({ ...prev, assets: true }));
             } else {
               setFetchStatus((prev) => ({ ...prev, assets: false }));
@@ -1741,8 +1747,8 @@
               fetch('./data/fear_greed.json').catch(() => null)
             ]);
 
-            if (!priceRes || !priceRes.ok) throw new Error(`${settings.symbol}.json 가격 파일을 불러오지 못했습니다.`);
-            if (!fxRes || !fxRes.ok) throw new Error('USDKRW.json 환율 파일을 불러오지 못했습니다.');
+            if (!priceRes || !priceRes.ok) throw new Error(`${assetLabel(settings.symbol)}.json 가격 파일을 불러오지 못했습니다.`);
+            if ((!fxRes || !fxRes.ok)&&!domestic) throw new Error('USDKRW.json 환율 파일을 불러오지 못했습니다.');
 
             nextStatus.price = true;
             nextStatus.fx = true;
@@ -1756,9 +1762,9 @@
             }
 
             const priceData = await priceRes.json();
-            const fxData = await fxRes.json();
+            const fxData = fxRes?.ok ? await fxRes.json() : [];
 
-            const merged = buildMergedSeries(priceData, fxData);
+            const merged = domestic ? DomesticTools.merged(priceData) : buildMergedSeries(priceData, fxData);
             if (!merged || merged.length === 0) throw new Error('병합된 시계열 데이터가 비어 있습니다.');
 
             if (!isCancelled) {
@@ -1769,8 +1775,8 @@
             }
           } catch (err) {
             if (!isCancelled) {
-              setRawData(fallbackSampleData);
-              setDataSource('SAMPLE');
+              setRawData(domestic?[]:fallbackSampleData);
+              setDataSource(domestic?'UNAVAILABLE':'SAMPLE');
               setFetchStatus((prev) => ({
                 ...prev,
                 price: false,
@@ -1828,7 +1834,7 @@
         const primaryEngine = effectiveMode === 'USD' ? usdEngine : krwEngine;
         const fearGate = (liveRating ? liveRating.rating : settings.fearGreedIndex) === 'Extreme Fear';
         const ddGate = primaryEngine ? primaryEngine.target.isTriggered : false;
-        const marketGate = fearGate && ddGate;
+        const marketGate = domestic ? ddGate : fearGate && ddGate;
         const finalSignal = marketGate;
 
         return {
@@ -1842,8 +1848,9 @@
 
       useEffect(() => {
         if (settings.currencyMode === 'USD') setChartUsd(true);
+        if(domestic)setChartUsd(false);
         if (settings.currencyMode === 'KRW') setChartKrw(true);
-      }, [settings.currencyMode]);
+      }, [settings.currencyMode,domestic]);
 
       const displayState = useMemo(() => {
         const q = dataSource === 'FETCHED' && screenQuote?.symbol === settings.symbol ? screenQuote : null;
@@ -1852,9 +1859,9 @@
         const primaryMode = settings.currencyMode === 'BOTH' ? settings.primarySignalMode : settings.currencyMode;
         const primaryEngine = primaryMode === 'USD' ? usdEngine : krwEngine;
         const ddGate = !!primaryEngine?.target.isTriggered;
-        const marketGate = appState.gates.fearGate && ddGate;
+        const marketGate = domestic ? ddGate : appState.gates.fearGate && ddGate;
         return {...appState,usdEngine,krwEngine,primaryEngine,gates:{...appState.gates,ddGate,marketGate,finalSignal:marketGate}};
-      }, [appState,screenQuote,settings.symbol,settings.currencyMode,settings.primarySignalMode,rawData,dataSource]);
+      }, [appState,screenQuote,settings.symbol,settings.currencyMode,settings.primarySignalMode,rawData,dataSource,domestic]);
 
       useEffect(() => {
         if (screenQuote && (displayState.usdEngine?.quoteInfo || displayState.krwEngine?.quoteInfo)) {
@@ -1865,15 +1872,16 @@
 
       const indicatorState = useMemo(() => {
         if (dataSource === 'LOADING') return {model:null,snapshot:false};
-        const rows = rawData.filter(r => r.date <= settings.endDate && isValidPositiveNumber(r.closeUsd));
+        const priceKey=domestic?'closeKrw':'closeUsd';
+        const rows = rawData.filter(r => r.date <= settings.endDate && isValidPositiveNumber(r[priceKey]));
         if (!rows.length) return {model:null,snapshot:false};
-        const series = rows.map(r=>({date:r.date,price:r.closeUsd}));
+        const series = rows.map(r=>({date:r.date,price:r[priceKey]}));
         const base = {timeSeries:series,analysisStart:series[0].date,analysisEnd:settings.endDate,metrics:{ath:Math.max(...series.map(r=>r.price))},target:{dd:settings.targetDdPct/100}};
-        const updated = QuoteTools.applySnapshot(base,dataSource === 'FETCHED' ? screenQuote : null,'USD',rawData,settings.symbol);
+        const updated = QuoteTools.applySnapshot(base,dataSource === 'FETCHED' && !domestic ? screenQuote : null,'USD',rawData,settings.symbol);
         const snapshot = !!updated.quoteInfo;
         const liveFx = snapshot && screenQuote.fx ? {rate:screenQuote.fx,date:QuoteTools.marketDate(screenQuote.sourceReadAt || screenQuote.fetchedAt),readAt:screenQuote.sourceReadAt || screenQuote.fetchedAt} : null;
         return {model:IndicatorTools.compute(updated.timeSeries,dataSource === 'FETCHED' ? indicatorFxRows : [],liveFx),snapshot,confirmedMomentum:IndicatorTools.movingAverageTrend(series)};
-      }, [rawData,indicatorFxRows,screenQuote,dataSource,settings.symbol,settings.endDate,settings.targetDdPct]);
+      }, [rawData,indicatorFxRows,screenQuote,dataSource,settings.symbol,settings.endDate,settings.targetDdPct,domestic]);
 
       const historicalChartModel = useMemo(() => buildChartModel(
         appState.usdEngine?.timeSeries, appState.krwEngine?.timeSeries
@@ -1919,6 +1927,7 @@
         const assetInfo = assetsList.find((a) => a.symbol === symbol);
 
         setSettings((prev) => ({ ...prev, symbol }));
+        setChartUsd(!DomesticTools.isDomestic(symbol));setChartKrw(true);
 
         setDataSource('LOADING');
         setReloadToken((prev) => prev + 1);
@@ -2025,7 +2034,7 @@
         const krwAutoAdjusted = meta.krwAnalysisStart && settings.startDate && meta.krwAnalysisStart > settings.startDate;
 
         const signal = displayState.gates.finalSignal;
-        const passCount = [displayState.gates.fearGate, displayState.gates.ddGate].filter(Boolean).length;
+        const passCount = (domestic?[displayState.gates.ddGate]:[displayState.gates.fearGate, displayState.gates.ddGate]).filter(Boolean).length;
 
         // 히어로 상태 구성
         const heroConfig = isLoading ? {
@@ -2035,7 +2044,7 @@
           emoji: '⚠️', title: '데이터를 확인해주세요', sub: '설정에서 자산과 기간을 확인해주세요.',
           bg: 'bg-white border-app-border', text: 'text-app-text'
         } : signal ? {
-          emoji: '🚀', title: '지금 매수 타이밍!', sub: '모든 조건이 충족되었습니다.',
+          emoji: '🚀', title: domestic?'추가매수 기준 도달':'지금 매수 타이밍!', sub: domestic?'설정한 원화 낙폭 조건에 도달했습니다.':'모든 조건이 충족되었습니다.',
           bg: 'bg-app-blueLight border-app-blue/20', text: 'text-app-blue'
         } : passCount >= 1 ? {
           emoji: '🧐', title: '조금만 더 지켜볼까요?', sub: '조건 하나가 더 충족되길 기다리세요.',
@@ -2048,7 +2057,7 @@
         return (
           <div className="space-y-4 pb-20">
 
-            <Card title={`${settings.symbol} 낙폭 매수 기준`}>
+            <Card title={`${assetLabel(settings.symbol)} 낙폭 매수 기준`}>
               <p className="text-sm text-app-subtext">{heroConfig.title} · {heroConfig.sub}</p>
                 {/* 자산 + 기간 선택 */}
                 {dataSource!=='LOADING' && (
@@ -2059,12 +2068,12 @@
                       className="px-4 py-2.5 bg-white border border-gray-200 rounded-xl text-sm font-bold text-app-text outline-none cursor-pointer shadow-sm hover:border-gray-300"
                     >
                       {assetsList.filter((a) => a.enabled !== false).map((a) => (
-                        <option key={a.symbol} value={a.symbol}>{a.symbol}</option>
+                        <option key={a.symbol} value={a.symbol}>{assetLabel(a.symbol)}</option>
                       ))}
                     </select>
 
                     {(() => {
-                      const dataFirstDate = meta.usdFirstDate || null;
+                      const dataFirstDate = (domestic?meta.krwFirstDate:meta.usdFirstDate) || null;
                       const today = new Date();
                       const todayStr = today.toISOString().slice(0, 10);
                       const periods = [
@@ -2100,7 +2109,7 @@
                     })()}
                   </div>
                 )}
-<div className="mt-4 grid grid-cols-2 gap-3"><div className="rounded-xl bg-blue-50 p-3"><p className="text-xs text-app-subtext">현재 최고점 대비 낙폭</p><strong className="text-2xl text-app-blue">{primary?formatPct1(primary.metrics.currentDd):'—'}</strong></div><label className="rounded-xl bg-pink-50 p-3 text-xs">{settings.symbol} 추가매수 기준<select aria-label="자산별 추가매수 기준" className="mt-1 block w-full rounded-lg border bg-white p-2 font-bold" value={settings.targetDdPct} onChange={e=>setSettings(p=>({...p,targetDdPct:Number(e.target.value)}))}>{FIXED_DD_STEPS.map(n=><option key={n} value={n}>{n}%</option>)}</select></label></div>
+<div className="mt-4 grid grid-cols-2 gap-3"><div className="rounded-xl bg-blue-50 p-3"><p className="text-xs text-app-subtext">현재 최고점 대비 낙폭</p><strong className="text-2xl text-app-blue">{primary?formatPct1(primary.metrics.currentDd):'—'}</strong></div><label className="rounded-xl bg-pink-50 p-3 text-xs">{assetLabel(settings.symbol)} 추가매수 기준<select aria-label="자산별 추가매수 기준" className="mt-1 block w-full rounded-lg border bg-white p-2 font-bold" value={settings.targetDdPct} onChange={e=>setSettings(p=>({...p,targetDdPct:Number(e.target.value)}))}>{FIXED_DD_STEPS.map(n=><option key={n} value={n}>{n}%</option>)}</select></label></div>
             </Card>
             {/* 경고 메시지 */}
             {fetchStatus.error && (
@@ -2114,17 +2123,17 @@
             {/* ============ 2단계: 왜 이런 판단인가요? ============ */}
             <Accordion
               title="현재 상태 진단"
-              subtitle={displayState.primaryEngine?.quoteInfo ? "조회 시세 반영 · 시장 공포 + 가격 하락" : "종가 기준 · 시장 공포 + 가격 하락"}
+              subtitle={domestic?"원화 종가 · 낙폭 조건 · 미국 공포지수는 참고":displayState.primaryEngine?.quoteInfo ? "조회 시세 반영 · 시장 공포 + 가격 하락" : "종가 기준 · 시장 공포 + 가격 하락"}
               emoji="🔍"
               open={showWhy}
               onToggle={() => setShowWhy(!showWhy)}
-              badge={<Badge active={signal} color={signal ? 'green' : 'amber'}>{passCount}/2 통과</Badge>}
+              badge={<Badge active={signal} color={signal ? 'green' : 'amber'}>{passCount}/{domestic?1:2} 통과</Badge>}
             >
               <div className="space-y-2">
                 <div className="flex justify-between items-center bg-gray-50 p-3 rounded-lg border border-gray-100">
                   <div>
-                    <span className="text-sm font-medium text-app-text">시장 공포 지수</span>
-                    <p className="text-xs text-app-subtext mt-0.5">"극단적 공포"일 때 통과</p>
+                    <span className="text-sm font-medium text-app-text">{domestic?'미국 공포 지수 · 참고':'시장 공포 지수'}</span>
+                    <p className="text-xs text-app-subtext mt-0.5">{domestic?'미국 시장 지표 · 국내 ETF 매수 조건에 미포함':'"극단적 공포"일 때 통과'}</p>
                   </div>
                   <Badge active={displayState.gates.fearGate} color={displayState.gates.fearGate ? 'green' : 'red'}>
                     {liveRating ? `${liveRating.rating} (${liveRating.score})` : settings.fearGreedIndex}
@@ -2147,7 +2156,7 @@
             {/* ============ 3단계: 현재 시장은 어떤가요? ============ */}
             <Accordion
               title="가격 및 낙폭 차트"
-              subtitle={primary ? `${settings.symbol} 최고점 대비 ${formatPct1(primary.metrics.currentDd)} 하락 중` : '데이터 없음'}
+              subtitle={primary ? `${assetLabel(settings.symbol)} 최고점 대비 ${formatPct1(primary.metrics.currentDd)} 하락 중` : '데이터 없음'}
               emoji="📊"
               sectionRef={chartSectionRef}
               open={showChart}
@@ -2306,7 +2315,7 @@
         );
       }
 
-      function renderDetail(){return <div><Card title="보조지표 분석"><p className="text-xs text-app-subtext">{settings.symbol} · {settings.startDate} ~ {settings.endDate}</p>                {/* 자산 + 기간 선택 */}
+      function renderDetail(){return <div><Card title="보조지표 분석"><p className="text-xs text-app-subtext">{assetLabel(settings.symbol)} · {settings.startDate} ~ {settings.endDate}</p>                {/* 자산 + 기간 선택 */}
                 {dataSource!=='LOADING' && (
                   <div className="my-3 flex flex-wrap justify-center items-center gap-2">
                     <select
@@ -2315,12 +2324,12 @@
                       className="px-4 py-2.5 bg-white border border-gray-200 rounded-xl text-sm font-bold text-app-text outline-none cursor-pointer shadow-sm hover:border-gray-300"
                     >
                       {assetsList.filter((a) => a.enabled !== false).map((a) => (
-                        <option key={a.symbol} value={a.symbol}>{a.symbol}</option>
+                        <option key={a.symbol} value={a.symbol}>{assetLabel(a.symbol)}</option>
                       ))}
                     </select>
 
                     {(() => {
-                      const dataFirstDate = meta.usdFirstDate || null;
+                      const dataFirstDate = (domestic?meta.krwFirstDate:meta.usdFirstDate) || null;
                       const today = new Date();
                       const todayStr = today.toISOString().slice(0, 10);
                       const periods = [
@@ -2357,13 +2366,13 @@
                   </div>
                 )}
               <UnemploymentPanel />
-              <IndicatorPanel model={indicatorState.model} snapshot={indicatorState.snapshot} source={dataSource} confirmedMomentum={indicatorState.confirmedMomentum} startDate={settings.startDate} endDate={settings.endDate} /></Card></div>;}
+              <IndicatorPanel currency={domestic?'KRW':'USD'} model={indicatorState.model} snapshot={indicatorState.snapshot} source={dataSource} confirmedMomentum={indicatorState.confirmedMomentum} startDate={settings.startDate} endDate={settings.endDate} /></Card></div>;}
 
       function renderSettings() {
         return (
           <div className="space-y-6 animate-fade-in pb-10">
             <QuoteConnectionSettings endpoint={quoteEndpoint} setEndpoint={setQuoteEndpoint} />
-            <Card title={`${settings.symbol} 프리셋`}>
+            <Card title={`${assetLabel(settings.symbol)} 프리셋`}>
               <p className="text-sm text-app-subtext mb-4">선택한 자산의 낙폭 기준에만 적용합니다. 다른 자산의 낙폭 기준은 유지합니다.</p>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                 {[
@@ -2407,7 +2416,7 @@
 
                   <div>
                     <label className="block text-xs font-bold text-app-subtext mb-1.5">표시 통화</label>
-                    <select name="currencyMode" value={settings.currencyMode} onChange={handleSettingChange} className="w-full p-3 bg-app-border border-none rounded-xl text-sm font-medium focus:ring-2 focus:ring-app-blue outline-none cursor-pointer">
+                    <select name="currencyMode" disabled={domestic} value={settings.currencyMode} onChange={handleSettingChange} className="w-full p-3 bg-app-border border-none rounded-xl text-sm font-medium focus:ring-2 focus:ring-app-blue outline-none cursor-pointer">
                       <option value="BOTH">달러 & 원화 동시</option>
                       <option value="USD">달러만</option>
                       <option value="KRW">원화만</option>
@@ -2416,7 +2425,7 @@
 
                   <div>
                     <label className="block text-xs font-bold text-app-subtext mb-1.5">주 신호 기준</label>
-                    <select name="primarySignalMode" value={settings.primarySignalMode} onChange={handleSettingChange} className="w-full p-3 bg-app-border border-none rounded-xl text-sm font-medium focus:ring-2 focus:ring-app-blue outline-none cursor-pointer">
+                    <select name="primarySignalMode" disabled={domestic} value={settings.primarySignalMode} onChange={handleSettingChange} className="w-full p-3 bg-app-border border-none rounded-xl text-sm font-medium focus:ring-2 focus:ring-app-blue outline-none cursor-pointer">
                       <option value="USD">달러 기준 우선</option>
                       <option value="KRW">원화 기준 우선</option>
                     </select>

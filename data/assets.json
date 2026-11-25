@@ -20,13 +20,25 @@
     "category": "US Growth"
   },
   {
+    "symbol": "069500",
+    "name": "KODEX 200",
+    "assetType": "ETF",
+    "enabled": true,
+    "currency": "KRW",
+    "market": "KRX",
+    "category": "Korea Equity",
+    "defaultTargetRecovery": 0.8,
+    "defaultBandStep": 0.05,
+    "order": 3
+  },
+  {
     "symbol": "HYG",
     "name": "iShares iBoxx $ High Yield Corporate Bond ETF",
     "assetType": "ETF",
     "enabled": true,
     "defaultTargetRecovery": 0.8,
     "defaultBandStep": 0.05,
-    "order": 3,
+    "order": 4,
     "category": "Credit"
   },
   {
@@ -36,7 +48,7 @@
     "enabled": true,
     "defaultTargetRecovery": 0.8,
     "defaultBandStep": 0.05,
-    "order": 4,
+    "order": 5,
     "category": "Gold"
   },
   {
@@ -46,7 +58,7 @@
     "enabled": true,
     "defaultTargetRecovery": 0.8,
     "defaultBandStep": 0.05,
-    "order": 5,
+    "order": 6,
     "category": "Long Treasury"
   }
 ]
