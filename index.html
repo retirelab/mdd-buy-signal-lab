@@ -86,10 +86,11 @@
   <script crossorigin src="https://unpkg.com/@babel/standalone@7.26.7/babel.min.js"></script>
 
   <script src="https://unpkg.com/lightweight-charts@5.1.0/dist/lightweight-charts.standalone.production.js"></script>
-  <script src="./unemployment-tools.js?v=20261125.1"></script>
-  <script src="./domestic-tools.js?v=20261125.1"></script>
-  <script src="./asset-settings.js?v=20261125.1"></script>
-  <script src="./chart-terminal.js?v=20261125.1"></script>
+  <script src="./unemployment-tools.js?v=20261125.2"></script>
+  <script src="./vix-tools.js?v=20261125.2"></script>
+  <script src="./domestic-tools.js?v=20261125.2"></script>
+  <script src="./asset-settings.js?v=20261125.2"></script>
+  <script src="./chart-terminal.js?v=20261125.2"></script>
 
   <style>
     body {
@@ -969,6 +970,37 @@
       </section>;
     }
 
+    function VixPanel(){
+      const [payload,setPayload]=useState(null),[status,setStatus]=useState(null),[error,setError]=useState(''),[open,setOpen]=useState(false),[span,setSpan]=useState('1'),[selected,setSelected]=useState(null);
+      useEffect(()=>{let cancelled=false;Promise.allSettled([fetch('./data/macro/VIXCLS.json',{cache:'no-store'}).then(r=>{if(!r.ok)throw Error('자료 조회 실패');return r.json();}),fetch('./data/macro/VIXCLS-status.json',{cache:'no-store'}).then(r=>{if(!r.ok)throw Error('상태 조회 실패');return r.json();})]).then(([data,check])=>{if(cancelled)return;if(data.status==='fulfilled')setPayload(data.value);else setError('VIX 자료를 불러오지 못했습니다.');if(check.status==='fulfilled')setStatus(check.value);});return()=>{cancelled=true;};},[]);
+      const model=useMemo(()=>VixTools.calculate(payload?.observations),[payload]);
+      const rows=useMemo(()=>{const valid=model.rows.filter(r=>r.value!==null);if(span==='all'||!valid.length)return valid.map(r=>({...r,fear:30}));const d=new Date(valid.at(-1).date+'T00:00:00Z');d.setUTCFullYear(d.getUTCFullYear()-Number(span));const from=d.toISOString().slice(0,10);return valid.filter(r=>r.date>from).map(r=>({...r,fear:30}));},[model,span]);
+      const series=useMemo(()=>ChartTerminal.prepareSeries(rows,[{id:'vix',key:'value',label:'VIX',color:'#7c3aed',width:2},{id:'fear',key:'fear',label:'공포 기준선 30',color:'#e11d48',width:1,dashed:true,toggleable:true}]),[rows]);
+      const latest=model.latest;
+      const stamp=value=>value?new Date(value).toLocaleString('ko-KR',{timeZone:'Asia/Seoul',hour12:false})+' KST':'자동 수집 확인 대기';
+      const toneClass={calm:'text-app-green',normal:'text-app-blue',uneasy:'text-amber-600',fear:'text-rose-600'};
+      return <section className="my-5 rounded-2xl border border-gray-200 bg-gray-50 p-4" data-testid="vix-panel">
+        <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="text-sm font-bold">미국 변동성 지수 · VIX</h3><span className="text-[11px] text-app-subtext">일간 · 종가</span></div>
+        {!latest?<p className="mt-3 text-xs text-app-subtext">{error||'VIX 자료 조회 중…'}</p>:<>
+          <p className="mt-2 text-xs text-app-subtext">기준일 {latest.date} · S&amp;P 500 옵션이 예상하는 향후 30일 변동성</p>
+          <div className="mt-3 grid grid-cols-2 gap-3"><div className="rounded-xl bg-white p-3"><p className="text-xs text-app-subtext">최신 VIX</p><p className={`mt-1 text-2xl font-bold ${toneClass[latest.zone.tone]}`}>{latest.value.toFixed(2)}</p><p className="mt-1 text-[11px] text-app-subtext">{latest.change===null?'전일 자료 없음':`전일 대비 ${latest.change>=0?'+':''}${latest.change.toFixed(2)}`}</p></div><div className="rounded-xl bg-white p-3"><p className="text-xs text-app-subtext">최근 1년 내 위치</p><p className="mt-1 text-2xl font-bold">{latest.position.toFixed(1)}%</p><p className="mt-1 text-[11px] text-app-subtext">저점 {latest.yearLow.toFixed(2)} ~ 고점 {latest.yearHigh.toFixed(2)}</p></div></div>
+          <p className="mt-3 text-sm font-semibold"><span className={toneClass[latest.zone.tone]}>{latest.zone.label} 구간</span> · {latest.zone.text}</p>
+          <p className="mt-1 text-xs text-app-subtext">{latest.since.slice(0,4)}년 이후 전체 기록 중 {latest.percentile.toFixed(1)}백분위 (높을수록 드물게 큰 공포)</p>
+          <p className="mt-2 text-[11px] text-app-subtext">구간 기준: 15 미만 안정 · 15~20 보통 · 20~30 불안 · 30 이상 공포. 가격 조회 기간·선택 자산과 별도로 최신 자료를 표시합니다.</p>
+          {status?.ok===false&&<p role="status" className="mt-2 text-xs text-amber-700">최근 자동 수집 실패 · 마지막 정상 자료를 표시합니다.</p>}
+          <p className="mt-2 text-[11px] text-app-subtext">마지막 수집 확인: {stamp(status?.checkedAt)}{status?.ok===true?' · 성공':''}</p>
+          <details className="mt-3 text-xs" onToggle={e=>setOpen(e.currentTarget.open)}><summary className="cursor-pointer font-semibold">VIX 차트와 최근 기록</summary>
+          {open&&<div className="mt-3"><label className="mb-2 flex items-center gap-2 text-app-subtext">표시 기간<select aria-label="VIX 차트 기간" value={span} onChange={e=>{setSpan(e.target.value);setSelected(null);}} className="rounded-lg border bg-white p-2"><option value="1">최근 1년</option><option value="5">최근 5년</option><option value="10">최근 10년</option><option value="all">전체 기록</option></select></label>
+            <TerminalPlot series={series} selectedDate={selected} onSelectDate={setSelected} label="VIX 일별 종가 차트" testId="terminal-vix" fallback={<p className="p-3 text-app-subtext">차트를 불러올 수 없습니다. 아래 표를 확인해주세요.</p>}/>
+            <p className="mt-3 text-[11px] text-app-subtext">최근 20거래일 · 전체 {model.rows.length.toLocaleString('ko-KR')}거래일 저장. 휴장·미발표일은 비워 둡니다.</p>
+            <div className="mt-2 max-h-64 overflow-auto rounded-lg border bg-white"><table className="w-full text-right text-[11px] tabular-nums"><thead><tr className="bg-gray-100">{['날짜','VIX','전일 대비','구간'].map(t=><th scope="col" key={t} className="p-2 whitespace-nowrap">{t}</th>)}</tr></thead><tbody>{(()=>{const v=model.rows.filter(r=>r.value!==null).slice(-21);return v.slice(1).map((r,i)=>({...r,chg:r.value-v[i].value})).reverse().map(r=><tr key={r.date} className="border-t"><td className="p-2">{r.date}</td><td className="p-2">{r.value.toFixed(2)}</td><td className="p-2">{(r.chg>=0?'+':'')+r.chg.toFixed(2)}</td><td className="p-2">{VixTools.zone(r.value).label}</td></tr>);})()}</tbody></table></div>
+          </div>}
+          </details>
+        </>}
+        <p className="mt-3 text-[11px] leading-relaxed text-app-subtext">출처: Cboe / <a className="underline" href="https://fred.stlouisfed.org/series/VIXCLS" target="_blank" rel="noopener noreferrer">FRED VIXCLS</a> (1990년~). 이 지표는 보조 정보이며 기존 매수 조건·과거 회복 통계에는 적용하지 않습니다.</p>
+      </section>;
+    }
+
     function IndicatorPanel({ model, snapshot, source, confirmedMomentum, startDate, endDate, currency="USD" }) {
       if (!model) return <p className="mt-4 text-xs text-app-subtext">보조지표를 계산할 가격 데이터가 없습니다.</p>;
       const priceMoney=n=>currency==='KRW'?formatKrw(n):'$'+n.toFixed(2);
@@ -1706,7 +1738,7 @@
       useEffect(() => {
         let isCancelled = false;
 
-        fetch('./data/assets.json?v=20261125.1', { cache: 'no-cache' })
+        fetch('./data/assets.json?v=20261125.2', { cache: 'no-cache' })
           .then((res) => (res.ok ? res.json() : null))
           .then((data) => {
             if (isCancelled) return;
@@ -2366,6 +2398,7 @@
                   </div>
                 )}
               <UnemploymentPanel />
+              <VixPanel />
               <IndicatorPanel currency={domestic?'KRW':'USD'} model={indicatorState.model} snapshot={indicatorState.snapshot} source={dataSource} confirmedMomentum={indicatorState.confirmedMomentum} startDate={settings.startDate} endDate={settings.endDate} /></Card></div>;}
 
       function renderSettings() {
