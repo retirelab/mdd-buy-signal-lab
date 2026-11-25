@@ -9,6 +9,7 @@ on:
         type: boolean
         default: false
   push:
+    branches: [main]
     paths:
       - scripts/update_fear_greed_history.py
       - .github/workflows/update-fear-greed-history.yml

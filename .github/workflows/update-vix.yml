@@ -4,6 +4,7 @@ on:
     - cron: '25 14 * * 2-6' # 23:25 Asia/Seoul (Tue–Sat), after FRED posts the prior US close
   workflow_dispatch:
   push:
+    branches: [main]
     paths:
       - scripts/update_vix.py
       - .github/workflows/update-vix.yml

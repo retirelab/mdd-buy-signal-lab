@@ -53,12 +53,16 @@ def parse_archive(text):
     return rows
 
 
-def parse_cnn(payload):
+def parse_cnn(payload, today=None):
+    """Keep closed US trading days only: drop today's live (provisional) point and weekend stamps."""
     data = payload['fear_and_greed_historical']['data']
+    today = today or datetime.now(timezone.utc).date()
     rows = []
     for point in data:
-        day = datetime.fromtimestamp(point['x'] / 1000, tz=timezone.utc).date().isoformat()
-        rows.append(row(day, float(point['y']), 'cnn'))
+        day = datetime.fromtimestamp(point['x'] / 1000, tz=timezone.utc).date()
+        if day >= today or day.weekday() >= 5:
+            continue
+        rows.append(row(day.isoformat(), float(point['y']), 'cnn'))
     if len(rows) < 30:
         raise ValueError('CNN history too short')
     return rows
