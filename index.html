@@ -1706,7 +1706,7 @@
       useEffect(() => {
         let isCancelled = false;
 
-        fetch('./data/assets.json')
+        fetch('./data/assets.json?v=20261125.1', { cache: 'no-cache' })
           .then((res) => (res.ok ? res.json() : null))
           .then((data) => {
             if (isCancelled) return;
