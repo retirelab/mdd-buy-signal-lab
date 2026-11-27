@@ -5,7 +5,7 @@
   "archive": "github.com/whit3rabbit/fear-greed-data (community archive, unofficial; gap 2020-06-05~2020-07-09)",
   "cnn": "https://production.dataviz.cnn.io/index/fearandgreed/graphdata (fear_and_greed_historical, ~1 year)"
  },
- "updatedAt": "2026-11-26T10:02:34+00:00",
+ "updatedAt": "2026-11-27T10:08:32+00:00",
  "observations": [
   {
    "date": "2011-01-03",
@@ -23859,7 +23859,13 @@
   },
   {
    "date": "2026-11-25",
-   "score": 15.6,
+   "score": 17.9,
+   "rating": "Extreme Fear",
+   "source": "cnn"
+  },
+  {
+   "date": "2026-11-26",
+   "score": 17.9,
    "rating": "Extreme Fear",
    "source": "cnn"
   }
